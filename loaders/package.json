@@ -1,0 +1,18 @@
+{
+	"name": "vklay-loaders",
+	"version": "0.1.0",
+	"description": "The built-in V_KLay phone driver (.vkd) files for the old Siemens phones, from the original V_KLay distribution.",
+	"license": "MIT",
+	"files": [
+		"*.vkd",
+		"manifest.json",
+		"README.md"
+	],
+	"exports": {
+		"./*": "./*"
+	},
+	"repository": {
+		"url": "git+https://github.com/siemens-mobile-hacks/sieflasher.git",
+		"directory": "loaders"
+	}
+}

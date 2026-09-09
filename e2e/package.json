@@ -1,0 +1,14 @@
+{
+	"name": "@sie-js/flasher-e2e",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"description": "e2e tests for the sie-flasher CLI against the pmb887x-emu phone emulator.",
+	"scripts": {
+		"e2e": "node run-e2e.mjs"
+	},
+	"devDependencies": {
+		"@sie-js/flasher-cli": "workspace:*",
+		"vklay-loaders": "workspace:*"
+	}
+}

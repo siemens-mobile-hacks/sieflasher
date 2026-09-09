@@ -1,0 +1,7 @@
+node_modules
+dist
+.test-build
+
+# e2e: the cloned pmb887x-emu tree and the fullflash dumps
+e2e/.emu
+e2e/fullflashes

@@ -1,0 +1,29 @@
+{
+	"name": "@sie-js/flasher-cli",
+	"version": "0.1.0",
+	"description": "The sie-flasher command line tool: flashing the old Siemens phones from the terminal.",
+	"type": "module",
+	"bin": {
+		"sie-flasher": "./dist/index.js"
+	},
+	"files": [
+		"./dist/*"
+	],
+	"scripts": {
+		"build": "tsc -p tsconfig.json",
+		"dev": "tsc -p tsconfig.json --watch",
+		"test": "node tests/cli.test.mjs"
+	},
+	"license": "MIT",
+	"repository": {
+		"url": "git+https://github.com/siemens-mobile-hacks/sieflasher.git",
+		"directory": "cli"
+	},
+	"dependencies": {
+		"@sie-js/flasher": "workspace:*"
+	},
+	"devDependencies": {
+		"@types/node": "^22.19.15",
+		"typescript": "^5.9.3"
+	}
+}

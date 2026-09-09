@@ -1,0 +1,122 @@
+[
+	{
+		"file": "3618_6618.vkd",
+		"name": "3618/6618",
+		"releaseDate": "2004-05-06",
+		"copyright": "Freia, ported to V_KLay by ValeraVi, modified for 3618 by kxn"
+	},
+	{
+		"file": "A35_A36_A40.vkd",
+		"name": "A35/A36/A40",
+		"releaseDate": "2004-05-26",
+		"copyright": "Freia, Ported to V_Klay by LazyC0DEr"
+	},
+	{
+		"file": "A50_1168.vkd",
+		"name": "A50/1168",
+		"releaseDate": "2004-05-26",
+		"copyright": "Freia, Ported to V_Klay by LazyC0DEr"
+	},
+	{
+		"file": "A52.vkd",
+		"name": "A52",
+		"releaseDate": "2004-05-26",
+		"copyright": "Freia, Ported to V_Klay by LazyC0DEr"
+	},
+	{
+		"file": "A55_C55_2128.vkd",
+		"name": "A55/C55/2128",
+		"releaseDate": "2004-05-26",
+		"copyright": "Freia, Ported to V_Klay by LazyC0DEr"
+	},
+	{
+		"file": "A60_C60_A65.vkd",
+		"name": "A60/C60/A65",
+		"releaseDate": "2004-05-26",
+		"copyright": "Freia, Ported to V_Klay by LazyC0DEr"
+	},
+	{
+		"file": "C30.vkd",
+		"name": "C30",
+		"releaseDate": "2004-05-26",
+		"copyright": "Freia, Ported to V_Klay by LazyC0DEr"
+	},
+	{
+		"file": "C35_M35_S35.vkd",
+		"name": "C35/M35/S35",
+		"releaseDate": "2004-05-26",
+		"copyright": "Freia, Ported to V_Klay by LazyC0DEr"
+	},
+	{
+		"file": "C45_2118.vkd",
+		"name": "C45/2118",
+		"releaseDate": "2004-05-26",
+		"copyright": "Freia, Ported to V_Klay by LazyC0DEr"
+	},
+	{
+		"file": "C60 BOOT.vkd",
+		"name": "C60 BOOT",
+		"releaseDate": "2004-05-26",
+		"copyright": "Freia, Ported to V_Klay by LazyC0DEr"
+	},
+	{
+		"file": "M55 BOOT_MC60 BOOT.vkd",
+		"name": "M55 BOOT/MC60 BOOT",
+		"releaseDate": "2004-05-26",
+		"copyright": "Freia, Ported to V_Klay by LazyC0DEr"
+	},
+	{
+		"file": "M55_MC60_CF62.vkd",
+		"name": "M55/MC60",
+		"releaseDate": "2004-05-26",
+		"copyright": "Freia, Ported to V_Klay by LazyC0DEr"
+	},
+	{
+		"file": "MT50_M50_3118.vkd",
+		"name": "MT50/M50/3118",
+		"releaseDate": "2004-05-26",
+		"copyright": "Freia, Ported to V_Klay by LazyC0DEr"
+	},
+	{
+		"file": "S40.vkd",
+		"name": "S40",
+		"releaseDate": "2004-05-26",
+		"copyright": "Freia, Ported to V_Klay by LazyC0DEr"
+	},
+	{
+		"file": "S45_ME45.vkd",
+		"name": "S45/ME45",
+		"releaseDate": "2004-05-26",
+		"copyright": "Freia, Ported to V_Klay by LazyC0DEr"
+	},
+	{
+		"file": "S55_SL55.vkd",
+		"name": "S55/SL55",
+		"releaseDate": "2004-10-24",
+		"copyright": "Freia, Ported to V_Klay by LazyC0DEr"
+	},
+	{
+		"file": "SL42_SL45_6688.vkd",
+		"name": "SL42/SL45/6688",
+		"releaseDate": "2004-05-26",
+		"copyright": "Freia, Ported to V_Klay by LazyC0DEr"
+	},
+	{
+		"file": "SL45_ex.vkd",
+		"name": "SL45 online on 115K/on 19200/turn ON",
+		"releaseDate": "2004-05-06",
+		"copyright": "mamaich"
+	},
+	{
+		"file": "SX1.vkd",
+		"name": "SX1",
+		"releaseDate": "2004-05-26",
+		"copyright": "Freia, Ported to V_Klay by LazyC0DEr"
+	},
+	{
+		"file": "x65.vkd",
+		"name": "C65/CX65/M65/S65/SL65",
+		"releaseDate": "2004-12-22",
+		"copyright": "Chaos, Ported to V_Klay by ValeraVi"
+	}
+]
