@@ -17,7 +17,7 @@ The browser UI for the library is the
 [web-tools](https://github.com/siemens-mobile-hacks/web-tools) (phone mode,
 fullflash file mode, the VKP patch editor, the dump compare tool and the patch
 history). The terminal UI is the
-[`sie-flasher` CLI](../cli) (work in progress).
+[`sieflasher` CLI](../cli) (work in progress).
 
 ## Installation
 
@@ -286,7 +286,7 @@ the matching driver), like `CFlasherPage::OpenDocument()`.
 The core has no web dependencies (Buffer is polyfilled by the bundler in
 browser apps and native in Node). A CLI tool only needs to implement the
 `FlasherTransport` interface on top of e.g. `serialport` — see the
-[`sie-flasher` CLI](../cli) (`vkd-dump` is implemented; the phone commands
+[`sieflasher` CLI](../cli) (`vkd-dump` is implemented; the phone commands
 and a TCP transport for the pmb887x-emu emulator are planned, exercised by the
 [e2e tests](../e2e)):
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// E2E test for the sie-flasher CLI against an emulated phone:
+// E2E test for the sieflasher CLI against an emulated phone:
 // pmb887x-emu (https://github.com/siemens-mobile-hacks/pmb887x-emu) is built
 // and started directly on the host (no Docker needed) with a fullflash from
 // https://git.siepatch.dev/siepatch/fullflashes, and its phone serial port is
@@ -58,7 +58,7 @@ function run(command, args, opts = {}) {
 function runCli(args) {
 	const result = spawnSync("node", [cliDist, ...args], { encoding: "utf8" });
 	if (result.status !== 0)
-		throw new Error(`sie-flasher ${args.join(" ")} failed:\n${result.stdout}${result.stderr}`);
+		throw new Error(`sieflasher ${args.join(" ")} failed:\n${result.stdout}${result.stderr}`);
 	return result.stdout;
 }
 
@@ -130,10 +130,10 @@ async function main() {
 		// The CLI. TODO: run a real flasher session over the TCP transport
 		// (boot the emulated phone, read the flash info) once the transport
 		// commands are implemented; for now smoke-test the CLI itself.
-		console.log("▸ sie-flasher --version");
+		console.log("▸ sieflasher --version");
 		console.log(`  ${runCli(["--version"]).trim()}`);
 
-		console.log(`▸ sie-flasher vkd-dump ${path.basename(x65Vkd)}`);
+		console.log(`▸ sieflasher vkd-dump ${path.basename(x65Vkd)}`);
 		console.log(`  ${runCli(["vkd-dump", x65Vkd]).split("\n")[0]}`);
 	} catch (error) {
 		failure = error;

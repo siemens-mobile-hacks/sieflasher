@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// sie-flasher: the CLI of the Siemens phone flasher (the V_KLay
+// sieflasher: the CLI of the Siemens phone flasher (the V_KLay
 // reimplementation). Work in progress: only vkd-dump is implemented; the
 // phone operations (info/read/write/bootcore/vkp) need a serial transport
 // and are exercised by the e2e tests against the pmb887x-emu emulator.
@@ -11,10 +11,10 @@ import { parseVkd, phoneDisplayName } from "@sie-js/flasher";
 const require = createRequire(import.meta.url);
 const { version } = require("../package.json") as { version: string };
 
-const USAGE = `sie-flasher ${version} — Siemens phone flasher (V_KLay reimplementation)
+const USAGE = `sieflasher ${version} — Siemens phone flasher (V_KLay reimplementation)
 
 Usage:
-  sie-flasher <command> [arguments]
+  sieflasher <command> [arguments]
 
 Commands:
   vkd-dump <file.vkd>    Parse a V_KLay phone driver (.vkd) and dump its contents
@@ -53,7 +53,7 @@ function cmdVkdDump(fileName: string): number {
 	try {
 		text = readFileSync(fileName, "latin1");
 	} catch (error) {
-		console.error(`sie-flasher: cannot read ${fileName}: ${(error as Error).message}`);
+		console.error(`sieflasher: cannot read ${fileName}: ${(error as Error).message}`);
 		return 1;
 	}
 
@@ -113,7 +113,7 @@ function main(argv: string[]): number {
 			return 0;
 		case "vkd-dump":
 			if (args.length !== 1) {
-				console.error("usage: sie-flasher vkd-dump <file.vkd>");
+				console.error("usage: sieflasher vkd-dump <file.vkd>");
 				return 2;
 			}
 			return cmdVkdDump(args[0]);
@@ -122,13 +122,13 @@ function main(argv: string[]): number {
 		case "write":
 		case "bootcore":
 		case "vkp":
-			console.error(`sie-flasher: '${command}' is not implemented yet (see 'sie-flasher help')`);
+			console.error(`sieflasher: '${command}' is not implemented yet (see 'sieflasher help')`);
 			return 1;
 		case undefined:
 			console.error(USAGE);
 			return 2;
 		default:
-			console.error(`sie-flasher: unknown command '${command}' (see 'sie-flasher help')`);
+			console.error(`sieflasher: unknown command '${command}' (see 'sieflasher help')`);
 			return 2;
 	}
 }

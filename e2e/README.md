@@ -1,6 +1,6 @@
 # e2e tests
 
-Runs the `sie-flasher` CLI against a real (emulated) phone:
+Runs the `sieflasher` CLI against a real (emulated) phone:
 [pmb887x-emu](https://github.com/siemens-mobile-hacks/pmb887x-emu) — the
 PMB887x hardware emulator — is built and started directly on the host with a
 fullflash from

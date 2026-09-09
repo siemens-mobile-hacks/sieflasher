@@ -1,10 +1,10 @@
 {
 	"name": "@sie-js/flasher-cli",
 	"version": "0.1.0",
-	"description": "The sie-flasher command line tool: flashing the old Siemens phones from the terminal.",
+	"description": "The sieflasher command line tool: flashing the old Siemens phones from the terminal.",
 	"type": "module",
 	"bin": {
-		"sie-flasher": "./dist/index.js"
+		"sieflasher": "./dist/index.js"
 	},
 	"files": [
 		"./dist/*"

@@ -22,7 +22,7 @@ const runFail = async (args) => {
 		assert.notEqual(error.code, 0);
 		return error;
 	}
-	assert.fail(`expected a non-zero exit code: sie-flasher ${args.join(' ')}`);
+	assert.fail(`expected a non-zero exit code: sieflasher ${args.join(' ')}`);
 };
 
 const VKD = `
@@ -81,7 +81,7 @@ test('vkd-dump on a missing file fails', async () => {
 });
 
 test('vkd-dump prints the phones, areas and boots', async () => {
-	const dir = mkdtempSync(path.join(tmpdir(), 'sie-flasher-cli-'));
+	const dir = mkdtempSync(path.join(tmpdir(), 'sieflasher-cli-'));
 	try {
 		const vkd = path.join(dir, 'test.vkd');
 		writeFileSync(vkd, VKD, 'latin1');
