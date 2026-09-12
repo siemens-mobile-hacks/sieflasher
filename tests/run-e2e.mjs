@@ -10,11 +10,25 @@
 // fullflash at the maximum speed. Every dump must match the fullflash file
 // byte for byte.
 //
+// The write tests (`write:` labels) mirror the read matrix with
+// `sieflasher write`: a modified copy of the fullflash range is written at
+// every speed, plus an unaligned range inside one flash block and one
+// whole fullflash per phone at the maximum speed. The write is verified
+// against the emulator's persisted flash copy after its exit: it must
+// equal the input written over the original fullflash, byte for byte,
+// everywhere — not just inside the written range. (A read back in a second
+// CLI session is not possible: after the loader stop the emulated phone is
+// dead until a power cycle, which the runner cannot do; the read path
+// itself is covered by the read matrix.)
+//
+// --smoke keeps only the tests that run under a minute each (everything
+// except the whole-fullflash reads and writes), for quick iteration.
+//
 // Every matrix entry runs as an independent test: its own emulator instance
 // and its own TCP port, so the tests run fully isolated. The tests are
 // executed in parallel, one test per CPU core (see --jobs).
 //
-// Usage: node run-e2e.mjs [--loader=<file.vkd>] [--jobs=N] [--only=<substr>] [--keep-emu]
+// Usage: node run-e2e.mjs [--loader=<file.vkd>] [--jobs=N] [--only=<substr>] [--keep-emu] [--smoke]
 // The same knobs exist as E2E_LOADER / E2E_JOBS / E2E_ONLY env.
 
 import { spawn, spawnSync } from "node:child_process";
@@ -50,6 +64,9 @@ const PHONES = [
 const READ_LENGTH = 512 * 1024;
 const SERIAL_WAIT_TIMEOUT = 60_000;
 const CLI_TIMEOUT_DEFAULT = 15 * 60_000;
+// A whole-fullflash write is ~an hour of emulated flash erases per phone
+// (measured: ~6 s per 128 KiB block), far beyond the default per-CLI budget.
+const FULLFLASH_WRITE_TIMEOUT_MS = 2 * 60 * 60 * 1000;
 
 function parseOptions(argv) {
 	const options = {
@@ -57,13 +74,18 @@ function parseOptions(argv) {
 		jobs: Number(process.env.E2E_JOBS ?? 0) || os.cpus().length,
 		only: process.env.E2E_ONLY ?? "",
 		keepEmu: false,
+		smoke: process.env.E2E_SMOKE == "1",
 		cliTimeout: Number(process.env.E2E_CLI_TIMEOUT ?? 0) || CLI_TIMEOUT_DEFAULT,
 	};
 	for (const arg of argv) {
 		const match = /^--([^=]+)(?:=(.*))?$/.exec(arg);
-		if (!match || !(match[1] in options))
+		if (!match)
 			throw new Error(`unknown option: ${arg}`);
-		const [, key, value = "true"] = match;
+		// The option keys use the kebab-case form of the fields (--keep-emu).
+		const key = match[1].replace(/-([a-z])/g, (_, c) => c.toUpperCase());
+		if (!(key in options))
+			throw new Error(`unknown option: ${arg}`);
+		const value = match[2] ?? "true";
 		if (key === "jobs")
 			options.jobs = Number(value);
 		else
@@ -133,7 +155,7 @@ function allocatePort() {
 	});
 }
 
-function startEmulator(test, port) {
+function startEmulator(test, port, flashPath) {
 	// Headless hosts need a virtual X server for the QEMU GTK display (the
 	// emulator frontend passes no -display none).
 	const xvfb = !process.env.DISPLAY && spawnSync("which", ["xvfb-run"], { encoding: "utf8" }).stdout.trim();
@@ -142,7 +164,7 @@ function startEmulator(test, port) {
 		args.push("-a", emuBin);
 	args.push(
 		"--device", test.device,
-		"--fullflash", test.fullflashPath,
+		"--fullflash", flashPath,
 		// The emulator defaults for siemens-* devices (see its src/main.cpp).
 		"--siemens-esn=12345678",
 		"--siemens-imei=490154203237518",
@@ -153,6 +175,10 @@ function startEmulator(test, port) {
 		"--serial", `tcp:127.0.0.1:${port},server=on,wait=off`,
 		"--wait-for-serial",
 	);
+	// The write tests need a writable flash: --rw maps the fullflash as a
+	// writable QEMU pflash drive (they always run on a private copy).
+	if (test.op === "write")
+		args.push("--rw");
 	const emuLog = [];
 	// detached: the emulator gets its own process group, so the whole tree
 	// (xvfb-run -> Xvfb + qemu) can be stopped with a group kill.
@@ -200,6 +226,26 @@ function firstDifference(a, b) {
 	return a.length === b.length ? -1 : len;
 }
 
+function formatSize(size) {
+	if (size >= 1024 * 1024 && size % (1024 * 1024) === 0)
+		return `${size / (1024 * 1024)} MiB`;
+	if (size >= 1024 && size % 1024 === 0)
+		return `${size / 1024} KiB`;
+	return `${size} B`;
+}
+
+// The write test input: the original fullflash range with a few chunks
+// overwritten with a deterministic pattern, so the write must really change
+// the flash while the untouched bytes must survive the block erases.
+function makeWriteInput(expected, baseAddr, length) {
+	const input = Buffer.from(expected.subarray(baseAddr, baseAddr + length));
+	for (let off = 0x10000 - 0x1000; off < length; off += 0x10000) {
+		for (let i = 0; i < 0x1000; i += 4)
+			input.writeUInt32LE((0xDEADBEEF ^ (baseAddr + off + i)) >>> 0, off + i);
+	}
+	return input;
+}
+
 async function runTest(options, test) {
 	const started = Date.now();
 	const log = [];
@@ -217,44 +263,92 @@ async function runTest(options, test) {
 
 	try {
 		const port = await allocatePort();
+		// The CLI budget: the per-test override (the whole-fullflash write
+		// needs far more than the default) or the global option.
+		const cliTimeout = test.cliTimeoutMS ?? options.cliTimeout;
+		// The write tests modify the flash: the emulator gets --rw on its own
+		// private copy of the fullflash, so the pristine submodule file never
+		// changes. The read tests use the original fullflash read-only.
+		const flashPath = test.op === "write"
+			? path.join(outputDir, "flash.bin")
+			: test.fullflashPath;
+		if (test.op === "write")
+			fs.copyFileSync(test.fullflashPath, flashPath);
+
 		say(`starting pmb887x-emu (${test.device}) with the serial port on tcp/127.0.0.1:${port}`);
-		const { emu: emuProcess, emuLog } = startEmulator(test, port);
+		const { emu: emuProcess, emuLog } = startEmulator(test, port, flashPath);
 		emu = emuProcess;
 		emuLogRef.log = emuLog;
 
 		await waitForSerialPort(port, SERIAL_WAIT_TIMEOUT);
-		say(`the serial port is open, reading ${test.length === test.fullflashSize ? "the fullflash" : "512 KiB"} at ${test.baud}`);
 
-		const result = await runCli([
-			"read",
+		// The CLI arguments shared by the read and the write flows.
+		const commonArgs = [
 			"--serial", `tcp://127.0.0.1:${port}`,
 			"--loader", options.loader,
 			"--phone", test.phone,
 			"--baud", String(test.baud),
+			"--base_addr", `0x${test.baseAddr.toString(16)}`,
 			"--length", String(test.length),
-			output,
-		], options.cliTimeout);
-		if (result.status !== 0) {
-			throw new Error(`sieflasher read failed (exit ${result.status ?? "killed"}):\n${result.stdout}${result.stderr}` +
-				(result.killed ? `(timed out after ${options.cliTimeout} ms)\n` : ""));
-		}
-		say(`sieflasher read: ${result.stdout.trim()}`);
+		];
 
-		const actual = fs.readFileSync(output);
-		if (actual.length !== test.length)
-			throw new Error(`the dump has ${actual.length} bytes, expected ${test.length}`);
-		const expected = test.expected.subarray(0, test.length);
-		const diff = firstDifference(expected, actual);
-		if (diff !== -1) {
-			const preview = (buffer, at) => buffer.subarray(Math.max(0, at - 8), at + 16).toString("hex").toUpperCase();
-			throw new Error(`the dump does not match the fullflash at offset 0x${diff.toString(16)}: ` +
-				`expected ${preview(expected, diff)}, got ${preview(actual, diff)}`);
+		if (test.op === "write") {
+			// Write the modified input; the verification happens after the
+			// emulator exit, against its persisted flash copy (see the finally
+			// block below).
+			const inputPath = path.join(outputDir, "input.bin");
+			fs.writeFileSync(inputPath, makeWriteInput(test.expected, test.baseAddr, test.length));
+
+			say(`the serial port is open, writing ${test.length === test.fullflashSize ? "the fullflash" : formatSize(test.length)} at ${test.baud}`);
+			const result = await runCli(["write", ...commonArgs, inputPath], cliTimeout);
+			if (result.status !== 0) {
+				throw new Error(`sieflasher write failed (exit ${result.status ?? "killed"}):\n${result.stdout}${result.stderr}` +
+					(result.killed ? `(timed out after ${cliTimeout} ms)\n` : ""));
+			}
+			say(`sieflasher write: ${result.stdout.trim()}`);
+		} else {
+			say(`the serial port is open, reading ${test.length === test.fullflashSize ? "the fullflash" : formatSize(test.length)} at ${test.baud}`);
+			const result = await runCli(["read", ...commonArgs, output], cliTimeout);
+			if (result.status !== 0) {
+				throw new Error(`sieflasher read failed (exit ${result.status ?? "killed"}):\n${result.stdout}${result.stderr}` +
+					(result.killed ? `(timed out after ${cliTimeout} ms)\n` : ""));
+			}
+			say(`sieflasher read: ${result.stdout.trim()}`);
+
+			const actual = fs.readFileSync(output);
+			if (actual.length !== test.length)
+				throw new Error(`the dump has ${actual.length} bytes, expected ${test.length}`);
+			const expected = test.expected.subarray(0, test.length);
+			const diff = firstDifference(expected, actual);
+			if (diff !== -1) {
+				const preview = (buffer, at) => buffer.subarray(Math.max(0, at - 8), at + 16).toString("hex").toUpperCase();
+				throw new Error(`the dump does not match the fullflash at offset 0x${diff.toString(16)}: ` +
+					`expected ${preview(expected, diff)}, got ${preview(actual, diff)}`);
+			}
+			say("the dump matches the fullflash");
 		}
-		say("the dump matches the fullflash");
 	} catch (error) {
 		failure = error;
 	} finally {
 		await stopEmulator(emu, options.keepEmu).catch(() => {});
+		if (!failure && test.op === "write") {
+			// The emulator persists its flash to the --rw backing file: after
+			// its exit the copy must equal the input written over the original
+			// fullflash, byte for byte, everywhere (not just in the range).
+			try {
+				const actual = fs.readFileSync(path.join(outputDir, "flash.bin"));
+				const expected = Buffer.from(test.expected);
+				expected.set(fs.readFileSync(path.join(outputDir, "input.bin")), test.baseAddr);
+				const diff = firstDifference(expected, actual);
+				if (diff !== -1)
+					throw new Error(`the persisted fullflash does not match at offset 0x${diff.toString(16)}: ` +
+					`expected ${expected.subarray(Math.max(0, diff - 8), diff + 16).toString("hex").toUpperCase()}, ` +
+					`got ${actual.subarray(Math.max(0, diff - 8), diff + 16).toString("hex").toUpperCase()}`);
+				say("the persisted fullflash matches");
+			} catch (error) {
+				failure = error;
+			}
+		}
 		if (failure) {
 			// Give the emulator a moment to flush its output.
 			await delay(100);
@@ -291,14 +385,31 @@ async function main() {
 		expectedByFile.set(file, entry);
 	}
 
-	// The matrix: every (phone, speed) reads 512 KiB, plus the whole
-	// fullflash at the maximum speed.
+	// The matrix: every (phone, speed) does a 512 KiB read and a 512 KiB
+	// write, plus an unaligned write inside one flash block (the
+	// read-modify-write path), plus one whole-fullflash read and one
+	// whole-fullflash write per phone at the maximum speed. The 512 KiB and
+	// the sub-page tests take seconds to ~30 s each; the whole-fullflash
+	// read takes a few minutes, and the whole-fullflash write ~an hour of
+	// emulated flash erases, so it carries its own generous CLI timeout and
+	// is queued last.
+	//
+	// --smoke keeps every test that runs under a minute per test (the
+	// per-speed 512 KiB matrix and the sub-page writes) and drops only the
+	// whole-fullflash tests: 42 of the 46 tests, a few minutes instead of
+	// the ~1 h full run.
 	const maxSpeed = SPEEDS[SPEEDS.length - 1];
 	const tests = [];
 	for (const entry of PHONES) {
-		for (const baud of SPEEDS)
-			tests.push({ ...entry, label: `${entry.fullflash}@${baud}`, baud, length: READ_LENGTH });
-		tests.push({ ...entry, label: `${entry.fullflash}@${maxSpeed}-fullflash`, baud: maxSpeed, length: entry.fullflashSize });
+		for (const baud of SPEEDS) {
+			tests.push({ ...entry, op: "read", baseAddr: 0, label: `${entry.fullflash}@${baud}`, baud, length: READ_LENGTH });
+			tests.push({ ...entry, op: "write", baseAddr: 0, label: `write:${entry.fullflash}@${baud}`, baud, length: READ_LENGTH });
+		}
+		tests.push({ ...entry, op: "write", baseAddr: 0x181234, label: `write:${entry.fullflash}@${maxSpeed}-subpage`, baud: maxSpeed, length: 64 * 1024 });
+		if (options.smoke)
+			continue;
+		tests.push({ ...entry, op: "read", baseAddr: 0, label: `${entry.fullflash}@${maxSpeed}-fullflash`, baud: maxSpeed, length: entry.fullflashSize });
+		tests.push({ ...entry, op: "write", baseAddr: 0, label: `write:${entry.fullflash}@${maxSpeed}-fullflash`, baud: maxSpeed, length: entry.fullflashSize, cliTimeoutMS: FULLFLASH_WRITE_TIMEOUT_MS });
 	}
 
 	const selected = options.only

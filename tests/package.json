@@ -5,7 +5,8 @@
 	"type": "module",
 	"description": "e2e tests for the sieflasher CLI against the pmb887x-emu phone emulator.",
 	"scripts": {
-		"e2e": "node run-e2e.mjs"
+		"e2e": "node run-e2e.mjs",
+		"e2e:smoke": "node run-e2e.mjs --smoke"
 	},
 	"devDependencies": {
 		"@sie-js/flasher-cli": "workspace:*",

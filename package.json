@@ -8,7 +8,8 @@
 	"scripts": {
 		"build": "pnpm -r build",
 		"test": "pnpm -r test",
-		"test:e2e": "pnpm --filter @sie-js/flasher-tests run e2e"
+		"test:e2e": "pnpm --filter @sie-js/flasher-tests run e2e",
+		"test:e2e:smoke": "pnpm --filter @sie-js/flasher-tests run e2e:smoke"
 	},
 	"repository": {
 		"url": "git+https://github.com/siemens-mobile-hacks/sieflasher.git"

@@ -24,7 +24,8 @@ git clone --recurse-submodules <url>
 pnpm install
 pnpm build
 pnpm test
-pnpm test:e2e   # needs git + the emulator build dependencies, see tests/README.md
+pnpm test:e2e         # needs git + the emulator build dependencies, see tests/README.md
+pnpm test:e2e:smoke   # the quick matrix: every sub-minute test (42 of the 46)
 ```
 
 See [core/README.md](core/README.md) for the flasher internals: the boot

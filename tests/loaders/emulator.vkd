@@ -39,9 +39,12 @@ Name		= S75
 Type		= PV x75
 Comments	= The pmb887x-emu siemens-s75 device with the pv_boot_x85 loader
 Boots		= Connect, GoBoot, PVBoot_x85, PVInit
-; The Intel 128Mbit top/bottom boot block layout the loader reports
-; (255x128K, 4x32K, 4x32K, 255x128K).
-MCUMemGeometry	= 0xA0000000: 0x020000, 0xA1FE0000: 0x008000, 0xA1FF0000: 0x008000, 0xA2000000: 0x020000
+; The erase-block layout of the two emulated flash chips (the PV loader
+; reports no flash info, so the geometry is explicit here): FLASH0 is the
+; Intel 128Mbit 880D with the 4x32K top boot blocks at 0xA1FE0000, FLASH1
+; is the 881C with the 4x32K bottom boot blocks at 0xA2000000; the rest is
+; 128K sectors.
+MCUMemGeometry	= 0xA0000000: 0x020000, 0xA1FE0000: 0x008000, 0xA2000000: 0x008000, 0xA2020000: 0x020000
 
 [Boot01]
 Name		= Connect

@@ -118,6 +118,62 @@ test('read fails on a missing loader or serial port', async () => {
 	}
 });
 
+test('write requires the serial, the loader and the input file', async () => {
+	const noSerial = await runFail(['write']);
+	assert.match(noSerial.stderr, /--serial is required/);
+	assert.match(noSerial.stderr, /usage: sieflasher write/);
+	const noLoader = await runFail(['write', '--serial', '/dev/ttyUSB0', 'in.bin']);
+	assert.match(noLoader.stderr, /--loader is required/);
+	const noInput = await runFail(['write', '--serial', '/dev/ttyUSB0', '--loader', '/nonexistent.vkd']);
+	assert.match(noInput.stderr, /exactly one input file path/);
+});
+
+test('write validates its arguments', async () => {
+	const unknown = await runFail(['write', '--nope=1', '--serial', 'x', '--loader', 'y', 'in.bin']);
+	assert.match(unknown.stderr, /unknown option --nope/);
+	const badAddr = await runFail(['write', '--serial', 'x', '--loader', 'y', '--base_addr', 'zz', 'in.bin']);
+	assert.match(badAddr.stderr, /invalid --base_addr/);
+	const badLength = await runFail(['write', '--serial', 'x', '--loader', 'y', '--length', '1X', 'in.bin']);
+	assert.match(badLength.stderr, /invalid --length/);
+	const badBaud = await runFail(['write', '--serial', 'x', '--loader', 'y', '--baud', 'fast', 'in.bin']);
+	assert.match(badBaud.stderr, /invalid --baud/);
+});
+
+test('write fails on a missing input or an out-of-range write', async () => {
+	const dir = mkdtempSync(path.join(tmpdir(), 'sieflasher-cli-'));
+	try {
+		const vkd = path.join(dir, 'test.vkd');
+		writeFileSync(vkd, VKD, 'latin1');
+
+		// The input file must exist.
+		const missing = await runFail(['write', '--serial', 'tcp://127.0.0.1:1', '--loader', vkd, path.join(dir, 'missing.bin')]);
+		assert.match(missing.stderr, /cannot read the input/);
+
+		// The input is bigger than the fullflash of the loader.
+		const big = path.join(dir, 'big.bin');
+		writeFileSync(big, Buffer.alloc(12 * 1024 * 1024 + 1));
+		const range = await runFail(['write', '--serial', 'tcp://127.0.0.1:1', '--loader', vkd, big]);
+		assert.match(range.stderr, /outside of the fullflash/);
+
+		const small = path.join(dir, 'small.bin');
+		writeFileSync(small, Buffer.alloc(1024));
+
+		// The range check happens before the serial port is touched.
+		const offset = await runFail(['write', '--serial', 'tcp://127.0.0.1:1', '--loader', vkd, '--base_addr', 'B00000', '--length', '4M', small]);
+		assert.match(offset.stderr, /outside of the fullflash/);
+
+		// --length beyond the input file size.
+		const long = await runFail(['write', '--serial', 'tcp://127.0.0.1:1', '--loader', vkd, '--length', '2K', small]);
+		assert.match(long.stderr, /exceeds the input file size/);
+
+		// Unknown phone of the loader.
+		const phone = await runFail(['write', '--serial', 'tcp://127.0.0.1:1', '--loader', vkd, '--phone', 'C35', small]);
+		assert.match(phone.stderr, /has no phone "C35" \(available: S55\)/);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
 test('vkd-dump requires exactly one file', async () => {
 	await runFail(['vkd-dump']);
 	await runFail(['vkd-dump', 'a.vkd', 'b.vkd']);
