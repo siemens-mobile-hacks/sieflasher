@@ -1,5 +1,5 @@
 {
-	"name": "@sie-js/flasher-e2e",
+	"name": "@sie-js/flasher-tests",
 	"version": "0.0.0",
 	"private": true,
 	"type": "module",

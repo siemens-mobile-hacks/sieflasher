@@ -2,4 +2,4 @@ packages:
   - core
   - loaders
   - cli
-  - e2e
+  - tests

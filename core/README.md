@@ -57,7 +57,7 @@ In the browser the core library is wired to WebSerial through
 `src/web/transport.ts`; the web-tools app connects it to its serial worker
 stack (the `FLSH` protocol service around `PhoneDevice`). The sibling packages
 of this monorepo: [`vklay-loaders`](../loaders) (the built-in `.vkd` drivers),
-[`@sie-js/flasher-cli`](../cli) (the CLI), [`e2e`](../e2e) (the e2e tests
+[`@sie-js/flasher-cli`](../cli) (the CLI), [`tests`](../tests) (the e2e tests
 against the pmb887x-emu phone emulator).
 
 ## The .vkd phone driver files
@@ -288,7 +288,7 @@ browser apps and native in Node). A CLI tool only needs to implement the
 `FlasherTransport` interface on top of e.g. `serialport` — see the
 [`sieflasher` CLI](../cli) (`vkd-dump` is implemented; the phone commands
 and a TCP transport for the pmb887x-emu emulator are planned, exercised by the
-[e2e tests](../e2e)):
+[e2e tests](../tests)):
 
 ```ts
 import { parseVkd, PhoneDevice, applyVkpToDevice, FullFlashDevice, diffBuffers } from "@sie-js/flasher";

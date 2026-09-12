@@ -47,5 +47,16 @@ else
 	git -C "$EMU_DIR" submodule update --init --recursive
 fi
 
+# The currently pinned bsp submodule references the hd155153np RF device,
+# which the pinned QEMU does not implement yet ("Unknown device:
+# hd155153np" on the siemens-* boards). Apply the board fix from
+# https://github.com/siemens-mobile-hacks/pmb887x-dev/pull/7 until it is
+# merged and pmb887x-emu updates the pin.
+if grep -rq hd155153np "$EMU_DIR/bsp/lib/data/board/" 2>/dev/null; then
+	echo "Applying the bsp board fix (pmb887x-dev PR #7)"
+	git -C "$EMU_DIR/bsp" fetch origin refs/pull/7/head
+	git -C "$EMU_DIR/bsp" checkout -q FETCH_HEAD
+fi
+
 cd "$EMU_DIR"
 ./tools/build.sh

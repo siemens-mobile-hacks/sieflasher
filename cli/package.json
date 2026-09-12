@@ -20,7 +20,11 @@
 		"directory": "cli"
 	},
 	"dependencies": {
-		"@sie-js/flasher": "workspace:*"
+		"@sie-js/flasher": "workspace:*",
+		"@sie-js/node-serialport-bindings-cpp": "^0.0.2",
+		"@sie-js/serial": "^1.1.19",
+		"@serialport/stream": "^13.0.0",
+		"serialport-bindings-socket": "^1.0.4"
 	},
 	"devDependencies": {
 		"@types/node": "^22.19.15",

@@ -25,7 +25,6 @@
 		"directory": "core"
 	},
 	"dependencies": {
-		"@sie-js/serial": "^1.1.17",
 		"@sie-js/vkp": "^2.0.2",
 		"debug": "^4.4.3",
 		"sprintf-js": "^1.1.3"

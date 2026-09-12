@@ -10,9 +10,21 @@ importers:
 
   cli:
     dependencies:
+      '@serialport/stream':
+        specifier: ^13.0.0
+        version: 13.0.0
       '@sie-js/flasher':
         specifier: workspace:*
         version: link:../core
+      '@sie-js/node-serialport-bindings-cpp':
+        specifier: ^0.0.2
+        version: 0.0.2
+      '@sie-js/serial':
+        specifier: ^1.1.19
+        version: 1.1.19(@serialport/stream@13.0.0)(debug@4.4.3)
+      serialport-bindings-socket:
+        specifier: ^1.0.4
+        version: 1.0.4
     devDependencies:
       '@types/node':
         specifier: ^22.19.15
@@ -23,9 +35,6 @@ importers:
 
   core:
     dependencies:
-      '@sie-js/serial':
-        specifier: ^1.1.17
-        version: 1.1.19(@serialport/stream@13.0.0)(debug@4.4.3)
       '@sie-js/vkp':
         specifier: ^2.0.2
         version: 2.0.2
@@ -49,7 +58,9 @@ importers:
         specifier: ^5.9.3
         version: 5.9.3
 
-  e2e:
+  loaders: {}
+
+  tests:
     devDependencies:
       '@sie-js/flasher-cli':
         specifier: workspace:*
@@ -57,8 +68,6 @@ importers:
       vklay-loaders:
         specifier: workspace:*
         version: link:../loaders
-
-  loaders: {}
 
 packages:
 
@@ -166,6 +175,9 @@ packages:
 
   safer-buffer@2.1.2:
     resolution: {integrity: sha512-YZo3K82SD7Riyi0E1EQPojLz7kpepnSQI9IyPbHHg1XXXevb5dJI7tpyN2ADxGcQbHG7vcyRHk0cbwqcQriUtg==}
+
+  serialport-bindings-socket@1.0.4:
+    resolution: {integrity: sha512-IsUwMFOIa7iNrqJz5KHesv94HlRejIhjAdz6any9s/YIJ7imxLyYPok2AzCslKbg9cY0kXLWE7og4hSTiitktw==}
 
   sprintf-js@1.1.3:
     resolution: {integrity: sha512-Oo+0REFV59/rz3gfJNKQiBlwfHaSESl1pcGyABQsnnIfWOFt6JNj5gCog2U6MLZ//IGYD+nA8nI+mTShREReaA==}
@@ -289,6 +301,8 @@ snapshots:
   safe-buffer@5.1.2: {}
 
   safer-buffer@2.1.2: {}
+
+  serialport-bindings-socket@1.0.4: {}
 
   sprintf-js@1.1.3: {}
 

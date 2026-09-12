@@ -70,6 +70,54 @@ test('planned commands are not implemented yet', async () => {
 	assert.match(error.stderr, /not implemented yet/);
 });
 
+test('read requires the serial and the loader', async () => {
+	const error = await runFail(['read']);
+	assert.match(error.stderr, /--serial is required/);
+	assert.match(error.stderr, /usage: sieflasher read/);
+});
+
+test('read validates its arguments', async () => {
+	const noLoader = await runFail(['read', '--serial', '/dev/ttyUSB0', 'out.bin']);
+	assert.match(noLoader.stderr, /--loader is required/);
+	const noOutput = await runFail(['read', '--serial', '/dev/ttyUSB0', '--loader', '/nonexistent.vkd']);
+	assert.match(noOutput.stderr, /exactly one output file path/);
+	const unknown = await runFail(['read', '--nope=1', '--serial', 'x', '--loader', 'y', 'out.bin']);
+	assert.match(unknown.stderr, /unknown option --nope/);
+	const badAddr = await runFail(['read', '--serial', 'x', '--loader', 'y', '--base_addr', 'zz', 'out.bin']);
+	assert.match(badAddr.stderr, /invalid --base_addr/);
+	const badLength = await runFail(['read', '--serial', 'x', '--loader', 'y', '--length', '1X', 'out.bin']);
+	assert.match(badLength.stderr, /invalid --length/);
+});
+
+test('read fails on a missing loader or serial port', async () => {
+	const missingLoader = await runFail(['read', '--serial', 'tcp://127.0.0.1:1', '--loader', '/nonexistent.vkd', 'out.bin']);
+	assert.match(missingLoader.stderr, /cannot read the loader/);
+
+	const dir = mkdtempSync(path.join(tmpdir(), 'sieflasher-cli-'));
+	try {
+		const vkd = path.join(dir, 'test.vkd');
+		writeFileSync(vkd, VKD, 'latin1');
+
+		// The range check happens before the serial port is touched.
+		const range = await runFail(['read', '--serial', 'tcp://127.0.0.1:1', '--loader', vkd, '--base_addr', 'C00000', '--length', '1M', 'out.bin']);
+		assert.match(range.stderr, /outside of the fullflash/);
+
+		// Unknown phone of the loader.
+		const phone = await runFail(['read', '--serial', 'tcp://127.0.0.1:1', '--loader', vkd, '--phone', 'C35', 'out.bin']);
+		assert.match(phone.stderr, /has no phone "C35" \(available: S55\)/);
+
+		// Bad baudrate.
+		const baud = await runFail(['read', '--serial', 'tcp://127.0.0.1:1', '--loader', vkd, '--baud', 'fast', 'out.bin']);
+		assert.match(baud.stderr, /invalid --baud/);
+
+		// Nothing listens on this port.
+		const refused = await runFail(['read', '--serial', 'tcp://127.0.0.1:1', '--loader', vkd, '--length', '1', path.join(dir, 'out.bin')]);
+		assert.match(refused.stderr, /cannot open tcp:\/\/127\.0\.0\.1:1/);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
 test('vkd-dump requires exactly one file', async () => {
 	await runFail(['vkd-dump']);
 	await runFail(['vkd-dump', 'a.vkd', 'b.vkd']);
