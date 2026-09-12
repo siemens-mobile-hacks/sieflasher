@@ -14,7 +14,25 @@ pnpm install
 pnpm build
 ```
 
-Then run the tool through its entry point (from the repository root):
+### Install as a global binary
+
+Install the `sieflasher` command onto your PATH with a pnpm global install
+(run it once beforehand if pnpm complains about the global bin directory):
+
+```
+pnpm setup
+pnpm add --global ./cli
+```
+
+After this `sieflasher <command>` works from anywhere. The global install
+links to this repository checkout, not a copy: `pnpm build` in the repo
+updates the installed command, so keep the checkout around. Remove it with
+`pnpm remove --global @sie-js/flasher-cli`.
+
+### Running from the repository
+
+Without a global install, run the tool through its entry point (from the
+repository root):
 
 ```
 node cli/dist/index.js <command>
@@ -22,7 +40,7 @@ node cli/dist/index.js <command>
 
 `cli/dist/index.js` is executable and starts with a `#!/usr/bin/env node`
 shebang, so `./cli/dist/index.js <command>` works too. For a persistent
-`sieflasher` command, add a shell alias:
+`sieflasher` command without a pnpm global install, add a shell alias:
 
 ```
 alias sieflasher="node /path/to/sieflasher/cli/dist/index.js"
@@ -67,8 +85,10 @@ The emulator wiring is exercised by the [e2e tests](../tests).
 
 ## Examples
 
+With the global binary installed (or substitute `node cli/dist/index.js`):
+
 ```
-$ node cli/dist/index.js vkd-dump loaders/x65.vkd
+$ sieflasher vkd-dump loaders/x65.vkd
 loaders/x65.vkd: 10 phone(s), 6 boot(s)
 copyright: Chaos, Ported to V_KLay by ValeraVi
 
@@ -76,6 +96,6 @@ Phone01: S65 (Chaos BootPatch)
   fullflash: 0xA0000000..0xA1FFFFFF (32 MiB)
   ...
 
-$ node cli/dist/index.js read --serial tcp://127.0.0.1:4444 \
+$ sieflasher read --serial tcp://127.0.0.1:4444 \
     --loader tests/loaders/emulator.vkd --phone EL71 dump.bin
 ```
