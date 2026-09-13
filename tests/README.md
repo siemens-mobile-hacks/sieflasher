@@ -34,7 +34,13 @@ Options (`--key=value` or `E2E_*` env variables):
 
 The first run builds pmb887x-emu into `tests/.emu` (gitignored; the build
 dependencies are installed automatically with `sudo apt-get` on
-Debian/Ubuntu, see `scripts/setup-emu.sh`).
+Debian/Ubuntu and `sudo pacman` on Arch/Manjaro, see `scripts/setup-emu.sh`).
+The binaries land in `tests/.emu/build-<distribution>-<arch>/`, so a
+checkout shared by several machines (a container and its host) keeps one
+build per machine: a QEMU linked against the libraries of one distribution
+does not start on another. A build that does not start is ignored and
+rebuilt; `E2E_EMU=/usr/bin/pmb887x-emu` uses a system-wide installation
+instead (ArchLinux: `yay -S pmb887x-emu`).
 
 ## The test matrix
 

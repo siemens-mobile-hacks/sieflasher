@@ -79,7 +79,8 @@ const fullflashesDir = path.join(testsDir, "fullflashes");
 const patchesDir = path.join(testsDir, "patches", "patches");
 // The tracked status of the patches that do not apply cleanly.
 const patchStatusFile = path.join(testsDir, "patches-status.json");
-const emuBin = path.join(testsDir, ".emu", "build", "pmb887x-emu");
+// Resolved by resolveEmuBin() before the first test starts.
+let emuBin = "";
 const cliDist = path.join(path.dirname(require.resolve("@sie-js/flasher-cli/package.json")), "dist", "index.js");
 
 // The default loader (the .vkd wrapping the emulator-compatible boots);
@@ -191,6 +192,45 @@ async function waitForSerialPort(port, timeoutMS, emu) {
 		await delay(500);
 	}
 	throw new Error(`the emulator serial port 127.0.0.1:${port} did not open within ${timeoutMS} ms`);
+}
+
+// The emulator build to run. The checkout is often shared between machines
+// (a container and its host), so scripts/setup-emu.sh builds into a
+// directory named after the distribution: a QEMU built elsewhere is present
+// but does not start here ("libaio.so.1t64: cannot open shared object
+// file"), which used to surface as every emulator dying on startup. Only a
+// build whose binaries answer --version counts; E2E_EMU points at an
+// emulator installed system-wide instead (ArchLinux: yay -S pmb887x-emu).
+function emuBinCandidates() {
+	const candidates = process.env.E2E_EMU ? [process.env.E2E_EMU] : [];
+	const emuDir = path.join(testsDir, ".emu");
+	for (const entry of fs.existsSync(emuDir) ? fs.readdirSync(emuDir) : []) {
+		if (entry == "build" || entry.startsWith("build-"))
+			candidates.push(path.join(emuDir, entry, "pmb887x-emu"));
+	}
+	return candidates;
+}
+
+function runs(bin) {
+	if (!fs.existsSync(bin) || spawnSync(bin, ["--version"], { stdio: "ignore" }).status !== 0)
+		return false;
+	// The emulator only starts its QEMU when a phone boots, far too late to
+	// tell a missing shared library from a broken test.
+	const qemu = path.join(path.dirname(bin), "qemu-install", "bin", "qemu-system-arm");
+	return !fs.existsSync(qemu) || spawnSync(qemu, ["--version"], { stdio: "ignore" }).status === 0;
+}
+
+function resolveEmuBin() {
+	const candidates = emuBinCandidates();
+	const working = candidates.find(runs);
+	if (working)
+		return working;
+	console.log("▸ Building pmb887x-emu (the first run takes a while)");
+	run("bash", [path.join(testsDir, "scripts", "setup-emu.sh")], { stdio: "inherit" });
+	const built = emuBinCandidates().find(runs);
+	if (!built)
+		throw new Error("no working pmb887x-emu build: run tests/scripts/setup-emu.sh manually");
+	return built;
 }
 
 // Reserves a free TCP port for the emulator serial chardev.
@@ -1018,15 +1058,12 @@ async function main() {
 	if (!selected.length)
 		throw new Error(`no tests match --only=${options.only}`);
 
-	// The emulator (built once into tests/.emu).
-	if (!fs.existsSync(emuBin)) {
-		console.log("▸ Building pmb887x-emu (the first run takes a while)");
-		run("bash", [path.join(testsDir, "scripts", "setup-emu.sh")], { stdio: "inherit" });
-	}
-
-	// The tests that boot an emulator need an X server for its GTK display.
-	if (selected.some((test) => test.op !== "patch" || test.target === "serial"))
+	// The emulator (built once into tests/.emu) and the X server for its GTK
+	// display; the patch tests against a file need neither.
+	if (selected.some((test) => test.op !== "patch" || test.target === "serial")) {
+		emuBin = resolveEmuBin();
 		await startXvfb();
+	}
 	// --keep-emu leaves the emulators running, so their display has to stay.
 	if (!options.keepEmu) {
 		process.once("exit", stopXvfb);
