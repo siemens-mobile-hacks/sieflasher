@@ -418,21 +418,55 @@ test("phone device v1: boot, read, write", async () => {
 	await device.open(115200);
 	assert.ok(device.connected);
 
-	// Reading
-	const data = await device.read(0x100, 0x100);
+	// Reading (read()/write() take the device addresses of getMemoryStart(),
+	// the flash offsets are readMemory()/writeMemory()).
+	const data = await device.read(0x400100, 0x100);
 	assert.equal(data.length, 0x100);
 	assert.deepEqual(Buffer.from(data), mock.flash.subarray(0x400100, 0x400200));
 
 	// Writing: 0x30000 spans two cache pages of 0x20000, the second page is
 	// flushed entirely (page-granularity writes, as in V_KLay) => 4 x 64k blocks.
 	const pattern = Buffer.alloc(0x30000, 0xAB);
-	await device.write(0, pattern);
+	await device.write(0x400000, pattern);
 	await device.flush();
 	assert.equal(mock.writes.length, 4);
 	for (const w of mock.writes) {
 		assert.equal(w.data.length, 0x10000);
 	}
 	assert.ok(mock.flash.subarray(0x400000, 0x430000).equals(pattern));
+
+	await device.disconnect();
+});
+
+test("phone device: device addresses and flash offsets", async () => {
+	// read()/write() of the FlasherDevice interface take the device addresses
+	// (getMemoryStart()..), like FullFlashDevice does; readAtOffset() /
+	// readMemory() take the flash offsets the loader itself uses.
+	const vkd = parseVkd(VKD_S55);
+	const phone = vkd.phones[0];
+	const mock = new MockPhoneV1(0x400000, 0xC00000);
+	const device = new PhoneDevice(new MockTransportV1(mock), phone, vkd.boots);
+	await device.open();
+
+	assert.equal(device.getMemoryStart(), 0x400000);
+	const expected = mock.flash.subarray(0x400100, 0x400200);
+	assert.deepEqual(Buffer.from(await device.read(0x400100, 0x100)), Buffer.from(expected));
+	assert.deepEqual(Buffer.from(await device.readAtOffset(0x100, 0x100)), Buffer.from(expected));
+	assert.deepEqual(Buffer.from(await device.readMemory(0x100, 0x100)), Buffer.from(expected));
+
+	// The flash offset of a device address is not a device address itself.
+	await assert.rejects(() => device.read(0x100, 0x10), /outside of the phone memory/);
+	await assert.rejects(() => device.read(0x400000 + 0xC00000, 0x10), /outside of the phone memory/);
+	await assert.rejects(() => device.write(0x100, Buffer.alloc(4)), /outside of the phone memory/);
+
+	// A patch applies to the phone device without any address juggling by the
+	// caller: the patch addresses are flash offsets, like in V_KLay.
+	const patched = Buffer.from(mock.flash.subarray(0x410000, 0x410004));
+	const vkp = vkpParse(`0x010000: ${patched.toString("hex").toUpperCase()} DEADBEEF\r\n`);
+	const result = await applyVkpToDevice(device, vkp, {});
+	assert.ok(result.ok, result.reports.map((r) => r.reason).join("\n"));
+	assert.equal(result.written, 4);
+	assert.deepEqual(Buffer.from(mock.flash.subarray(0x410000, 0x410004)), Buffer.from([0xDE, 0xAD, 0xBE, 0xEF]));
 
 	await device.disconnect();
 });
@@ -447,7 +481,7 @@ test("phone device: bootcore write skip", async () => {
 
 	// The bootcore area is at 0x800000-0x810000, flash page there = 0x10000
 	const pattern = Buffer.alloc(0x10000, 0xCD);
-	await device.write(0x800000 - 0x400000, pattern);
+	await device.write(0x800000, pattern);
 	await device.flush();
 	// No write must happen (bootcore skip)
 	assert.equal(mock.writes.length, 0);
@@ -1117,13 +1151,13 @@ test("phone device x65: v2 protocol with authorization and test-empty", async ()
 	}
 
 	// Reading
-	const data = await device.read(0, 0x100);
+	const data = await device.read(0xA0000000, 0x100);
 	assert.ok(Buffer.from(data).equals(mock.flash.subarray(0, 0x100)));
 
 	// Writing (v2: F + addr(4) + size(4) + data + crc).
 	// Write outside of the bootcore area (which is skipped by default).
 	const pattern = Buffer.alloc(0x18000, 0xCD); // partial page of 0x20000
-	await device.write(0x40000, pattern);
+	await device.write(0xA0040000, pattern);
 	await device.flush();
 	assert.equal(mock.writes.length, 1); // the whole 0x20000 cache page
 	assert.equal(mock.writes[0].addr, mock.base + 0x40000);
@@ -1163,7 +1197,7 @@ optLoaderUploadDelay=1`));
 	await device.open(115200);
 	assert.ok(device.connected);
 	// The loader state of the mock must be past the boot phase now.
-	const data = await device.read(0, 0x100);
+	const data = await device.read(0xA0000000, 0x100);
 	assert.equal(data.length, 0x100);
 	await device.disconnect();
 });

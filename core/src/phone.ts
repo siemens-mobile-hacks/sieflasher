@@ -817,54 +817,80 @@ export class PhoneDevice extends FlasherDevice {
 	}
 
 	// Public operation entry points with the whole-operation progress.
+	// They address the flash by the offset from its start (the V_KLay
+	// "address 0xA15C0000 is 0x015C0000" form), unlike read()/write(), which
+	// take the device addresses of getMemoryStart().
+	//
 	// The page cache is dropped before every operation so that each
 	// Read Memory / Write Memory reflects the current phone state
 	// (V_KLay closes the device after each operation, which clears the cache).
-	async readMemory(addr: number, size: number): Promise<Uint8Array> {
+	async readMemory(offset: number, size: number): Promise<Uint8Array> {
 		this.cache.clearCache();
-		return this.withProgress(size, true, () => this.read(addr, size));
+		return this.withProgress(size, true, () => this.readAtOffset(offset, size));
 	}
 
-	async writeMemory(addr: number, data: Uint8Array): Promise<void> {
+	async writeMemory(offset: number, data: Uint8Array): Promise<void> {
 		this.cache.clearCache();
 		return this.withProgress(data.length, false, async () => {
-			await this.write(addr, data);
+			await this.writeAtOffset(offset, data);
 			await this.flush();
 		});
 	}
 
 	// ------------------------------------------------------------------
 	// Memory read/write
+	//
+	// The FlasherDevice methods take the device addresses the flash is mapped
+	// at (getMemoryStart(), 0xA0000000 on x65), like FullFlashDevice does;
+	// the loader itself addresses the flash by the offset from its start, so
+	// the *AtOffset() pair below is what the rest of the class works with.
 
-	// VDevicePhone::Read()
 	async read(addr: number, size: number): Promise<Uint8Array> {
+		return this.readAtOffset(addr - this.memoryStart, size);
+	}
+
+	async write(addr: number, data: Uint8Array): Promise<void> {
+		return this.writeAtOffset(addr - this.memoryStart, data);
+	}
+
+	private checkRange(offset: number, size: number): void {
+		if (offset < 0 || size < 0 || offset + size > this.memorySize)
+			throw new PhoneDeviceError(sprintf(
+				"Address 0x%08X (size 0x%X) is outside of the phone memory 0x%08X-0x%08X.",
+				(offset + this.memoryStart) >>> 0, size, this.memoryStart >>> 0, (this.memoryStart + this.memorySize) >>> 0));
+	}
+
+	// VDevicePhone::Read(), by the flash offset.
+	async readAtOffset(offset: number, size: number): Promise<Uint8Array> {
+		this.checkRange(offset, size);
 		const result = Buffer.alloc(size);
 		let rest = size;
-		let cursor = addr;
+		let cursor = offset;
 		while (rest > 0) {
 			this.checkCancel();
 			const entry = this.cache.getPageAtAddr(cursor);
 			if (!entry)
 				throw new PhoneDeviceError(sprintf("Out of memory geometry at 0x%08X.", cursor));
 			const { page, isNew } = entry;
-			const offset = cursor - page.addr;
-			let len = Math.min(page.size - offset, rest);
+			const pageOffset = cursor - page.addr;
+			let len = Math.min(page.size - pageOffset, rest);
 			if (isNew) {
 				this.beginPageProgress();
 				await this.loaderReadMemory(page.addr, page.size, page.data);
 			}
-			result.set(page.data.subarray(offset, offset + len), size - rest);
+			result.set(page.data.subarray(pageOffset, pageOffset + len), size - rest);
 			cursor += len;
 			rest -= len;
 		}
 		return result;
 	}
 
-	// VDevicePhone::Write()
-	async write(addr: number, data: Uint8Array): Promise<void> {
+	// VDevicePhone::Write(), by the flash offset.
+	async writeAtOffset(offset: number, data: Uint8Array): Promise<void> {
+		this.checkRange(offset, data.length);
 		let rest = data.length;
-		let cursor = addr;
-		let offset = 0;
+		let cursor = offset;
+		let dataOffset = 0;
 		while (rest > 0) {
 			this.checkCancel();
 			const entry = this.cache.getPageAtAddr(cursor);
@@ -883,14 +909,14 @@ export class PhoneDevice extends FlasherDevice {
 				}
 			}
 			if (canCompare)
-				canCompare = buffersEqual(page.data.subarray(pageOffset, pageOffset + len), data.subarray(offset, offset + len));
+				canCompare = buffersEqual(page.data.subarray(pageOffset, pageOffset + len), data.subarray(dataOffset, dataOffset + len));
 			if (!canCompare) {
-				page.data.set(data.subarray(offset, offset + len), pageOffset);
+				page.data.set(data.subarray(dataOffset, dataOffset + len), pageOffset);
 				if (!page.isChanged && !this.isSkipWritingInBlock(page.addr, page.size))
 					page.isChanged = true;
 			}
 			cursor += len;
-			offset += len;
+			dataOffset += len;
 			rest -= len;
 		}
 	}
