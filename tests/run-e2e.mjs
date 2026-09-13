@@ -170,7 +170,7 @@ function runCli(args, timeoutMS, env) {
 	});
 }
 
-async function waitForSerialPort(port, timeoutMS) {
+async function waitForSerialPort(port, timeoutMS, emu) {
 	const deadline = Date.now() + timeoutMS;
 	while (Date.now() < deadline) {
 		const connected = await new Promise((resolve) => {
@@ -183,6 +183,11 @@ async function waitForSerialPort(port, timeoutMS) {
 		});
 		if (connected)
 			return;
+		// An emulator that died (no X server, no free display, a bad
+		// fullflash) never opens its port: say so instead of waiting out the
+		// whole timeout.
+		if (emu && emu.exitCode !== null)
+			throw new Error(`the emulator exited with ${emu.exitCode} before opening its serial port`);
 		await delay(500);
 	}
 	throw new Error(`the emulator serial port 127.0.0.1:${port} did not open within ${timeoutMS} ms`);
@@ -200,13 +205,61 @@ function allocatePort() {
 	});
 }
 
+// The virtual X server of the run (see startXvfb): one for all the tests,
+// instead of the xvfb-run of every single emulator.
+let xvfbProcess;
+
+// Headless hosts need an X server for the QEMU GTK display (the emulator
+// frontend passes no -display none). One Xvfb is started for the whole run
+// and exported as DISPLAY: `xvfb-run -a` per emulator used to leave its Xvfb
+// behind on the group kill, and with every leftover the display scan of the
+// next one got slower until the emulators stopped coming up at all.
+async function startXvfb() {
+	if (process.env.DISPLAY)
+		return;
+	if (!spawnSync("which", ["Xvfb"], { encoding: "utf8" }).stdout.trim()) {
+		console.log("▸ neither DISPLAY nor Xvfb: the emulator may fail to start (install xvfb)");
+		return;
+	}
+	// -displayfd lets the server pick a free display itself and report it
+	// back, so parallel runs cannot race for the same number.
+	const xvfb = spawn("Xvfb", ["-displayfd", "3", "-screen", "0", "1280x1024x24", "-nolisten", "tcp"], {
+		detached: true,
+		stdio: ["ignore", "ignore", "pipe", "pipe"],
+	});
+	const display = await new Promise((resolve, reject) => {
+		let out = "";
+		const timer = setTimeout(() => reject(new Error("Xvfb did not report its display within 30 s")), 30_000);
+		xvfb.stdio[3].on("data", (chunk) => {
+			out += chunk;
+			if (!out.includes("\n"))
+				return;
+			clearTimeout(timer);
+			resolve(out.trim());
+		});
+		xvfb.once("exit", (code) => {
+			clearTimeout(timer);
+			reject(new Error(`Xvfb exited with ${code}`));
+		});
+	});
+	xvfbProcess = xvfb;
+	process.env.DISPLAY = `:${display}`;
+	console.log(`▸ Xvfb on DISPLAY=${process.env.DISPLAY}`);
+}
+
+function stopXvfb() {
+	if (!xvfbProcess)
+		return;
+	try {
+		process.kill(-xvfbProcess.pid, "SIGTERM");
+	} catch {
+		xvfbProcess.kill("SIGTERM");
+	}
+	xvfbProcess = undefined;
+}
+
 function startEmulator(test, port, flashPath) {
-	// Headless hosts need a virtual X server for the QEMU GTK display (the
-	// emulator frontend passes no -display none).
-	const xvfb = !process.env.DISPLAY && spawnSync("which", ["xvfb-run"], { encoding: "utf8" }).stdout.trim();
 	const args = [];
-	if (xvfb)
-		args.push("-a", emuBin);
 	args.push(
 		"--device", test.device,
 		"--fullflash", flashPath,
@@ -226,9 +279,9 @@ function startEmulator(test, port, flashPath) {
 	if (test.op !== "read")
 		args.push("--rw");
 	const emuLog = [];
-	// detached: the emulator gets its own process group, so the whole tree
-	// (xvfb-run -> Xvfb + qemu) can be stopped with a group kill.
-	const emu = spawn(xvfb || emuBin, args, {
+	// detached: the emulator gets its own process group, so it and its QEMU
+	// can be stopped with a group kill.
+	const emu = spawn(emuBin, args, {
 		detached: true,
 		env: { ...process.env, QEMU_AUDIO_DRV: "none" },
 		stdio: ["ignore", "pipe", "pipe"],
@@ -245,7 +298,7 @@ async function stopEmulator(emu, keepEmu) {
 		emu.unref();
 		return;
 	}
-	// Signal the whole process group (xvfb-run, Xvfb and QEMU).
+	// Signal the whole process group (the emulator and its QEMU).
 	const killGroup = (signal) => {
 		try {
 			process.kill(-emu.pid, signal);
@@ -486,7 +539,7 @@ async function emulatorSession(options, test, flashPath, command, cliArgs, cliTi
 	say(`starting pmb887x-emu (${test.device}) with the serial port on tcp/127.0.0.1:${port}`);
 	const { emu, emuLog } = startEmulator(test, port, flashPath);
 	try {
-		await waitForSerialPort(port, SERIAL_WAIT_TIMEOUT);
+		await waitForSerialPort(port, SERIAL_WAIT_TIMEOUT, emu);
 		const result = await runCli([command, "--serial", `tcp://127.0.0.1:${port}`, ...cliArgs], cliTimeout, env);
 		return { result, emuLog };
 	} finally {
@@ -679,7 +732,7 @@ async function runTest(options, test) {
 		emu = emuProcess;
 		emuLogRef.log = emuLog;
 
-		await waitForSerialPort(port, SERIAL_WAIT_TIMEOUT);
+		await waitForSerialPort(port, SERIAL_WAIT_TIMEOUT, emu);
 
 		// The CLI arguments shared by the read and the write flows.
 		const commonArgs = [
@@ -969,6 +1022,22 @@ async function main() {
 	if (!fs.existsSync(emuBin)) {
 		console.log("▸ Building pmb887x-emu (the first run takes a while)");
 		run("bash", [path.join(testsDir, "scripts", "setup-emu.sh")], { stdio: "inherit" });
+	}
+
+	// The tests that boot an emulator need an X server for its GTK display.
+	if (selected.some((test) => test.op !== "patch" || test.target === "serial"))
+		await startXvfb();
+	// --keep-emu leaves the emulators running, so their display has to stay.
+	if (!options.keepEmu) {
+		process.once("exit", stopXvfb);
+		for (const signal of ["SIGINT", "SIGTERM"]) {
+			process.once(signal, () => {
+				stopXvfb();
+				process.exit(1);
+			});
+		}
+	} else {
+		xvfbProcess?.unref();
 	}
 
 	const jobs = Math.max(1, Math.min(options.jobs, selected.length));

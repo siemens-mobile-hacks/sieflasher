@@ -456,6 +456,12 @@ class TtyPrompt {
 	private open(): Readable | undefined {
 		if (this.tty)
 			return this.tty;
+		// A question is only worth asking when somebody is looking at it: with
+		// every standard stream redirected (a test harness, a CI job, a pipe)
+		// the controlling terminal of the session may still be open, but the
+		// warning was never shown on it.
+		if (!process.stdin.isTTY && !process.stderr.isTTY && !process.stdout.isTTY)
+			return undefined;
 		if (this.options.patch && process.stdin.isTTY)
 			return process.stdin;
 		if (process.platform == "win32")
