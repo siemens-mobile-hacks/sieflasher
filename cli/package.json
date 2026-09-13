@@ -12,7 +12,7 @@
 	"scripts": {
 		"build": "tsc -p tsconfig.json",
 		"dev": "tsc -p tsconfig.json --watch",
-		"test": "node tests/cli.test.mjs"
+		"test": "node --test tests/*.test.mjs"
 	},
 	"license": "MIT",
 	"repository": {
@@ -23,6 +23,7 @@
 		"@sie-js/flasher": "workspace:*",
 		"@sie-js/node-serialport-bindings-cpp": "^0.0.2",
 		"@sie-js/serial": "^1.1.19",
+		"@sie-js/vkp": "^2.0.2",
 		"@serialport/stream": "^13.0.0",
 		"serialport-bindings-socket": "^1.0.4"
 	},

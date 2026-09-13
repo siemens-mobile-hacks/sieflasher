@@ -107,6 +107,96 @@ export function parsePhoneFileArgs(args: string[], fileRole: "input" | "output")
 	return options;
 }
 
+// The options of the patch commands (apply, revert): the phone connection
+// (--serial + --loader) or a fullflash dump file (--file) as the target, the
+// behaviour flags and the optional positional patch path ("-" or nothing
+// reads the patch from stdin).
+export interface PatchOptions {
+	serial?: string;
+	file?: string;
+	loader?: string;
+	phone?: string;
+	baseAddr?: number;
+	baud?: number;
+	dryRun: boolean;
+	yes: boolean;
+	force: boolean;
+	history: boolean;
+	// The .vkp path; undefined means stdin.
+	patch?: string;
+}
+
+export function parsePatchArgs(args: string[]): PatchOptions {
+	const options: PatchOptions = { dryRun: false, yes: false, force: false, history: true };
+	const positional: string[] = [];
+	for (let i = 0; i < args.length; i++) {
+		const arg = args[i];
+		const inline = /^--([^=]+)=(.*)$/.exec(arg);
+		const key = inline ? inline[1] : arg.startsWith("--") ? arg.slice(2) : undefined;
+		if (!key) {
+			positional.push(arg);
+			continue;
+		}
+		// The flags take no value.
+		if (["dry-run", "yes", "force", "no-history"].includes(key)) {
+			if (inline)
+				throw new Error(`--${key} takes no value`);
+			switch (key) {
+				case "dry-run": options.dryRun = true; break;
+				case "yes": options.yes = true; break;
+				// Forcing implies confirming: neither asks anything.
+				case "force": options.force = true; options.yes = true; break;
+				case "no-history": options.history = false; break;
+			}
+			continue;
+		}
+		const value = inline ? inline[2] : args[++i];
+		if (value === undefined)
+			throw new Error(`missing value for --${key}`);
+		switch (key) {
+			case "serial": options.serial = value; break;
+			case "file": options.file = value; break;
+			case "loader": options.loader = value; break;
+			case "phone": options.phone = value; break;
+			case "baud": {
+				options.baud = parseInt(value, 10);
+				if (!Number.isInteger(options.baud) || options.baud <= 0)
+					throw new Error(`invalid --baud "${value}": expected a baudrate like 115200`);
+				break;
+			}
+			case "base_addr":
+				options.baseAddr = parseAddr(value);
+				if (options.baseAddr === undefined)
+					throw new Error(`invalid --base_addr "${value}": expected a hex address like 0x400000`);
+				break;
+			default:
+				throw new Error(`unknown option --${key}`);
+		}
+	}
+	if (options.serial && options.file)
+		throw new Error("--serial and --file are mutually exclusive: patch either a phone or a dump file");
+	if (!options.serial && !options.file)
+		throw new Error("--serial or --file is required");
+	if (options.serial && !options.loader)
+		throw new Error("--loader is required with --serial");
+	if (options.file) {
+		const phoneOnly = [
+			["loader", options.loader],
+			["phone", options.phone],
+			["baud", options.baud],
+		].find(([, value]) => value !== undefined);
+		if (phoneOnly)
+			throw new Error(`--${phoneOnly[0]} is only used with --serial`);
+	} else if (options.baseAddr !== undefined) {
+		throw new Error("--base_addr is only used with --file (the patch addresses select the flash offsets of a phone)");
+	}
+	if (positional.length > 1)
+		throw new Error("at most one patch file path is expected");
+	if (positional.length == 1 && positional[0] != "-")
+		options.patch = positional[0];
+	return options;
+}
+
 export function formatPhoneInfo(info: PhoneInfo): string {
 	if (info.kind == "v3") {
 		const regions = info.regions.map((r) => `${r.blocksCount}x${formatSize(r.eraseSize)}`).join(", ");

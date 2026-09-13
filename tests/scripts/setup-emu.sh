@@ -5,9 +5,10 @@
 #
 # The build dependencies follow the QEMU configure flags of the emulator
 # (gtk, pixman, capstone, smartcard, udev, pulseaudio, aio, io_uring,
-# xkbcommon). Debian/Ubuntu is supported out of the box (missing packages
-# are installed with sudo apt-get); on other systems install the
-# equivalents manually and re-run.
+# xkbcommon); they are named below for Debian/Ubuntu and only reported, not
+# installed. An emulator that is already installed or built elsewhere needs
+# none of this: run-e2e.mjs --emu=/path/to/pmb887x-emu runs that one
+# instead.
 set -euo pipefail
 
 EMU_DIR="$(cd "$(dirname "$0")/.." && pwd)/.emu"
@@ -16,8 +17,16 @@ EMU_BIN="$EMU_DIR/build/pmb887x-emu"
 QEMU_BIN="$EMU_DIR/build/qemu-install/bin/qemu-system-arm"
 
 if [[ -x "$EMU_BIN" && -x "$QEMU_BIN" ]]; then
-	echo "pmb887x-emu is already built: $EMU_BIN"
-	exit 0
+	# Present is not enough: a build carried over from another machine is
+	# there but does not start ("libaio.so.1t64: cannot open shared object
+	# file"), which otherwise only shows up as every emulator dying later.
+	if "$EMU_BIN" --version >/dev/null 2>&1 && "$QEMU_BIN" --version >/dev/null 2>&1; then
+		echo "pmb887x-emu is already built: $EMU_BIN"
+		exit 0
+	fi
+	echo "$EMU_BIN exists but does not start here (built on another machine?)." >&2
+	echo "Remove $EMU_DIR/build to build it again, or run the tests with --emu=/path/to/pmb887x-emu." >&2
+	exit 1
 fi
 
 PACKAGES=(
@@ -27,18 +36,17 @@ PACKAGES=(
 	xvfb
 )
 
-if command -v apt-get >/dev/null 2>&1; then
+if command -v dpkg >/dev/null 2>&1; then
 	missing=()
 	for pkg in "${PACKAGES[@]}"; do
 		dpkg -s "$pkg" >/dev/null 2>&1 || missing+=("$pkg")
 	done
 	if (( ${#missing[@]} > 0 )); then
-		echo "Installing build dependencies: ${missing[*]}"
-		sudo apt-get update -qq
-		sudo apt-get install -y -qq "${missing[@]}"
+		echo "Install the missing build dependencies first: ${missing[*]}" >&2
+		exit 1
 	fi
 else
-	echo "apt-get not found, make sure these are installed: ${PACKAGES[*]}"
+	echo "Make sure the build dependencies are installed (Debian/Ubuntu names): ${PACKAGES[*]}"
 fi
 
 if [[ ! -d "$EMU_DIR/.git" ]]; then

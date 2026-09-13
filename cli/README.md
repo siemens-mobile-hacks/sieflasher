@@ -55,7 +55,8 @@ pass e.g. `loaders/x65.vkd` (relative to the repository root) as `--loader`.
 
 ## Commands
 
-**Work in progress.** Currently implemented:
+**Work in progress.** Currently implemented (planned: `info`, `bootcore`,
+see `sieflasher help`):
 
 * `sieflasher vkd-dump <file.vkd>` — parse a V_KLay phone driver and dump
   its phones, memory areas, flash geometry and boot sequence.
@@ -76,7 +77,72 @@ sieflasher read --serial <device> --loader <file.vkd> [--phone <name>] \
 | `--length` | how many bytes to read (default: to the end of the fullflash; accepts `512K`, `4M`, `0x80000`) |
 | `--baud` | the loader connection speed (default: 115200) |
 
-Planned: `info`, `write`, `bootcore`, `vkp` (see `sieflasher help`).
+* `sieflasher write` — write a file (a fullflash dump or a part of it) into
+  the phone flash memory; the same options as `read`.
+* `sieflasher apply` / `sieflasher revert` — apply a VKP patch to a phone or
+  to a fullflash dump file, and undo it again:
+
+```
+sieflasher apply  [options] [patch.vkp]
+sieflasher revert [options] [patch.vkp]
+```
+
+| Option | Description |
+| --- | --- |
+| `<patch.vkp>` | the patch; without it (or with `-`) the patch is read from stdin |
+| `--serial` | the serial port of the phone (see `read`) |
+| `--loader` | the V_KLay phone driver (`.vkd`), required with `--serial` |
+| `--phone` | the phone definition of the loader (by name; default: the first) |
+| `--baud` | the loader connection speed (default: 115200) |
+| `--file` | patch a fullflash dump file in place instead of a phone (an alternative to `--serial`) |
+| `--base_addr` | with `--file`: the flash address the dump starts at (default: its `_From_XX` file name suffix, or `0`) |
+| `--dry-run` | only check whether the patch applies / reverts, write nothing |
+| `--yes` | answer the warnings with yes (for non-interactive use) |
+| `--force` | write even when the data does not match, without asking and without saving a recovery patch |
+| `--no-history` | do not log the run into the patch history |
+
+Patch addresses are the V_KLay flash offsets (`0x00A165E8` is the CPU address
+`0xA0A165E8` on x65); patches written with absolute addresses work as well.
+A patch reaching outside of the flash is rejected before anything is written.
+
+### The patch history and the recovery patches
+
+Every real (not `--dry-run`) apply and revert is logged into
+`~/.sieflasher/history` — the analog of V_KLay's patch logging and of the
+History tab of the [web tools](https://siemens-mobile-hacks.github.io/):
+
+```
+~/.sieflasher/history/2026-09/2026-09-13_12-30-01_apply_SIEMENS_EL71_490154203237518_mypatch.vkp
+~/.sieflasher/history/2026-09/2026-09-13_12-30-01_apply_SIEMENS_EL71_490154203237518_mypatch.json
+```
+
+The `.vkp` is the patch text as it was applied, the `.json` sidecar holds the
+date, the action, the device (model, IMEI, the unique device name and the
+flash info), the patch name and title, the number of writes, the written
+bytes, the result (`ok`, `partial`, `cancelled`) and the recovery patch, when
+one was saved. Nothing is deleted automatically. The root is
+`%APPDATA%\sieflasher` on Windows and can be overridden with the
+`SIEFLASHER_HOME` environment variable.
+
+When a patch does not apply (or revert) cleanly — its old data is not in the
+flash, or it has no old data at all, so the undo would be impossible — the
+CLI prints the V_KLay warning and asks whether to continue. On a yes it
+saves a **recovery patch** into `~/.sieflasher/recovery` *before* writing
+anything and prints its path: applying it back with `sieflasher revert`
+restores the original flash contents.
+
+```
+$ sieflasher apply --serial /dev/ttyUSB0 --loader loaders/x65.vkd mypatch.vkp
+! WARNING: the old data of 1 of 3 block(s) of the patch is not found in the flash.
+! First mismatch at 0xA05BF92B (patch line 12): the flash has 00, the patch expects D1.
+! ...
+! [y/N] y
+recovery patch saved: ~/.sieflasher/recovery/2026-09-13_12-30-01_mypatch_REPAIR.vkp
+```
+
+Without a terminal to ask on (a script, a pipe) the warnings are declined and
+nothing is written; `--yes` confirms them instead (the recovery patch is
+still saved), `--force` skips both the questions and the recovery patch.
 
 The serial transport is built on
 [@sie-js/serial](https://github.com/siemens-mobile-hacks/node-sie-serial)
@@ -98,4 +164,16 @@ Phone01: S65 (Chaos BootPatch)
 
 $ sieflasher read --serial tcp://127.0.0.1:4444 \
     --loader tests/loaders/emulator.vkd --phone EL71 dump.bin
+
+$ sieflasher apply --serial /dev/ttyUSB0 --loader loaders/x65.vkd \
+    --phone EL71 patches/EL71v41/6673-Disable_Aircraft_Check.vkp
+patch: 6673-Disable_Aircraft_Check.vkp: 1 write(s), "EL71v41"
+phone: SIEMENS EL71, IMEI 490154203237518, flash 0x8819 @ 0xA0000000 (256x256 KiB)
+applying 6673-Disable_Aircraft_Check.vkp on /dev/ttyUSB0
+  0xA05BF92B      1 B  applied
+history: ~/.sieflasher/history/2026-09/2026-09-13_12-30-01_apply_SIEMENS_EL71_490154203237518_6673-Disable_Aircraft_Check.vkp
+6673-Disable_Aircraft_Check.vkp: 1 write(s): 1 applied, 0 skipped, 0 failed; 1 B written to /dev/ttyUSB0 in 12.4s
+
+$ sieflasher revert --file S75_2020-01-01_From_A0.bin mypatch.vkp
+$ cat mypatch.vkp | sieflasher apply --file dump.bin --dry-run
 ```

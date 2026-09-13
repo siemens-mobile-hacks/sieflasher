@@ -1,3 +1,6 @@
 [submodule "tests/fullflashes"]
 	path = tests/fullflashes
 	url = https://git.siepatch.dev/siepatch/fullflashes.git
+[submodule "tests/patches"]
+	path = tests/patches
+	url = https://github.com/siemens-mobile-hacks/patches.git
