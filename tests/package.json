@@ -9,7 +9,9 @@
 		"e2e:smoke": "node run-e2e.mjs --smoke"
 	},
 	"devDependencies": {
+		"@sie-js/flasher": "workspace:*",
 		"@sie-js/flasher-cli": "workspace:*",
+		"@sie-js/vkp": "^2.0.2",
 		"vklay-loaders": "workspace:*"
 	}
 }

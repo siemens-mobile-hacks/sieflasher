@@ -1,0 +1,41 @@
+{
+	"_comment": "The patches of tests/patches that do not apply cleanly to the fullflashes of tests/fullflashes, per firmware: noop = already applied, dirty = the old data of the patch is not in this flash, invalid = the patch does not parse, outside = the patch addresses are outside of the flash. Patches that apply cleanly are not listed. Regenerate with: node run-e2e.mjs --update-patch-status",
+	"S75v40": {
+		"3784-Change_position_and_font_of_provide.vkp": {
+			"status": "invalid",
+			"reason": "Found placeholder instead of real patch data at line 15 col 13"
+		},
+		"3785-MainScreen_positioning.vkp": {
+			"status": "invalid",
+			"reason": "Found placeholder instead of real patch data at line 15 col 13"
+		},
+		"3786-Change_font_size_on_MainScreen.vkp": {
+			"status": "dirty",
+			"reason": "WARNING: the old data of 2 of 11 block(s) of the patch is not found in the flash."
+		},
+		"3861-Browsing_Java_in_MyStuff.vkp": {
+			"status": "dirty",
+			"reason": "WARNING: the old data of 2 of 2 block(s) of the patch is not found in the flash."
+		},
+		"3862-Photo_Folder_Change_v2_0.vkp": {
+			"status": "dirty",
+			"reason": "WARNING: the old data of 2 of 2 block(s) of the patch is not found in the flash."
+		},
+		"3969-reboot_v1_1.vkp": {
+			"status": "dirty",
+			"reason": "WARNING: the old data of 2 of 3 block(s) of the patch is not found in the flash."
+		},
+		"4442-lighter_during_incoming_call11.vkp": {
+			"status": "dirty",
+			"reason": "WARNING: the old data of 1 of 14 block(s) of the patch is not found in the flash."
+		},
+		"4562-Change_name.vkp": {
+			"status": "dirty",
+			"reason": "WARNING: the old data of 1 of 1 block(s) of the patch is not found in the flash."
+		},
+		"6428-Change_Illumination_Turn_Off_Timer.vkp": {
+			"status": "dirty",
+			"reason": "WARNING: the old data of 1 of 2 block(s) of the patch is not found in the flash."
+		}
+	}
+}

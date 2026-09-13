@@ -22,6 +22,9 @@ importers:
       '@sie-js/serial':
         specifier: ^1.1.19
         version: 1.1.19(@serialport/stream@13.0.0)(debug@4.4.3)
+      '@sie-js/vkp':
+        specifier: ^2.0.2
+        version: 2.0.2
       serialport-bindings-socket:
         specifier: ^1.0.4
         version: 1.0.4
@@ -62,9 +65,15 @@ importers:
 
   tests:
     devDependencies:
+      '@sie-js/flasher':
+        specifier: workspace:*
+        version: link:../core
       '@sie-js/flasher-cli':
         specifier: workspace:*
         version: link:../cli
+      '@sie-js/vkp':
+        specifier: ^2.0.2
+        version: 2.0.2
       vklay-loaders:
         specifier: workspace:*
         version: link:../loaders
