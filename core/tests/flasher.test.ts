@@ -421,8 +421,8 @@ test("phone device v1: boot, read, write", async () => {
 	await device.open(115200);
 	assert.ok(device.connected);
 
-	// Reading (read()/write() take the device addresses of getMemoryStart(),
-	// the flash offsets are readMemory()/writeMemory()).
+	// Reading (every public entry point takes the device addresses of
+	// getMemoryStart()).
 	const data = await device.read(0x400100, 0x100);
 	assert.equal(data.length, 0x100);
 	assert.deepEqual(Buffer.from(data), mock.flash.subarray(0x400100, 0x400200));
@@ -442,9 +442,10 @@ test("phone device v1: boot, read, write", async () => {
 });
 
 test("phone device: device addresses and flash offsets", async () => {
-	// read()/write() of the FlasherDevice interface take the device addresses
-	// (getMemoryStart()..), like FullFlashDevice does; readAtOffset() /
-	// readMemory() take the flash offsets the loader itself uses.
+	// Every public entry point takes the device addresses (getMemoryStart()..),
+	// like FullFlashDevice does, both the session read()/write() and the
+	// one-shot readFlash(); the flash offsets the loader itself uses never
+	// leave the class.
 	const vkd = parseVkd(VKD_S55);
 	const phone = vkd.phones[0];
 	const mock = new MockPhoneV1(0x400000, 0xC00000);
@@ -454,13 +455,14 @@ test("phone device: device addresses and flash offsets", async () => {
 	assert.equal(device.getMemoryStart(), 0x400000);
 	const expected = mock.flash.subarray(0x400100, 0x400200);
 	assert.deepEqual(Buffer.from(await device.read(0x400100, 0x100)), Buffer.from(expected));
-	assert.deepEqual(Buffer.from(await device.readAtOffset(0x100, 0x100)), Buffer.from(expected));
-	assert.deepEqual(Buffer.from(await device.readMemory(0x100, 0x100)), Buffer.from(expected));
+	assert.deepEqual(Buffer.from(await device.readFlash(0x400100, 0x100)), Buffer.from(expected));
 
 	// The flash offset of a device address is not a device address itself.
 	await assert.rejects(() => device.read(0x100, 0x10), /outside of the phone memory/);
 	await assert.rejects(() => device.read(0x400000 + 0xC00000, 0x10), /outside of the phone memory/);
 	await assert.rejects(() => device.write(0x100, Buffer.alloc(4)), /outside of the phone memory/);
+	await assert.rejects(() => device.readFlash(0x100, 0x10), /outside of the phone memory/);
+	await assert.rejects(() => device.writeFlash(0x100, Buffer.alloc(4)), /outside of the phone memory/);
 
 	// A patch applies to the phone device without any address juggling by the
 	// caller: the patch addresses are flash offsets, like in V_KLay.
@@ -1268,7 +1270,7 @@ test("phone device: operation-wide progress for read and write", async () => {
 	// Read 3 pages worth through the public operation entry point.
 	const events: { cursor: number; total: number }[] = [];
 	device.onProgress = (p) => events.push({ cursor: p.cursor, total: p.total });
-	const data = await device.readMemory(0, 0x60000);
+	const data = await device.readFlash(0x400000, 0x60000);
 	device.onProgress = undefined;
 	assert.equal(data.length, 0x60000);
 	assert.ok(events.length > 0);
@@ -1283,7 +1285,7 @@ test("phone device: operation-wide progress for read and write", async () => {
 	// Write progress as well.
 	const writeEvents: { cursor: number; total: number }[] = [];
 	device.onProgress = (p) => writeEvents.push({ cursor: p.cursor, total: p.total });
-	await device.writeMemory(0x40000, Buffer.alloc(0x40000, 0x99));
+	await device.writeFlash(0x440000, Buffer.alloc(0x40000, 0x99));
 	device.onProgress = undefined;
 	assert.ok(writeEvents.length > 0);
 	for (const e of writeEvents)
@@ -1337,13 +1339,13 @@ test("phone device: repeated reads always fetch fresh data from the phone", asyn
 	const device = new PhoneDevice(transport, phone, vkd.boots);
 	await device.open(115200);
 
-	const first = await device.readMemory(0x1000, 0x100);
+	const first = await device.readFlash(0x401000, 0x100);
 	assert.ok(Buffer.from(first).equals(mock.flash.subarray(0x401000, 0x401100)));
 
 	// The flash content changes between the operations (e.g. the phone FFS):
 	// the second read must not be served from the stale page cache.
 	mock.flash.fill(0x5A, 0x401000, 0x401100);
-	const second = await device.readMemory(0x1000, 0x100);
+	const second = await device.readFlash(0x401000, 0x100);
 	assert.ok(Buffer.from(second).equals(mock.flash.subarray(0x401000, 0x401100)),
 		"the second read must return the updated phone data");
 
@@ -1493,7 +1495,7 @@ test("vkp apply: a patch spanning multiple blocks reads and writes every block e
 	await device.disconnect();
 });
 
-test("vkp apply: readMemory()/writeMemory() routing refetches and rewrites the whole block for every write", async (t) => {
+test("vkp apply: readFlash()/writeFlash() routing refetches and rewrites the whole block for every write", async (t) => {
 	if (!multiblockDataAvailable()) {
 		skipWithoutMultiblockData(t);
 		return;
@@ -1503,23 +1505,19 @@ test("vkp apply: readMemory()/writeMemory() routing refetches and rewrites the w
 
 	// How the web tools drove the patch engine when applying this patch got
 	// stuck "on reading the block": every per-write read()/write() of the
-	// engine was routed through PhoneDevice.readMemory()/writeMemory() - the
-	// operation-level API which drops the whole page cache before every call
-	// (so that a Read Memory always reflects the current phone state). The
-	// containing block is then fetched from the phone again for every single
-	// patch write; for this patch thousands of full-block reads instead of
-	// one per touched block, each visible as a repeated "Reading 0x..."
-	// line.
-	const operationWrapper = (device: PhoneDevice): DeviceMemory => {
-		const base = device.getMemoryStart();
-		return {
-			read: (addr: number, size: number) => device.readMemory(addr - base, size),
-			write: (addr: number, data: Uint8Array) => device.writeMemory(addr - base, data),
-			flush: async () => {},
-			getMemoryStart: () => device.getMemoryStart(),
-			getMemorySize: () => device.getMemorySize(),
-		};
-	};
+	// engine was routed through the one-shot readFlash()/writeFlash() pair,
+	// which drops the whole page cache before every call (so that a read
+	// always reflects the current phone state). The containing block is then
+	// fetched from the phone again for every single patch write; for this
+	// patch thousands of full-block reads instead of one per touched block,
+	// each visible as a repeated "Reading 0x..." line.
+	const operationWrapper = (device: PhoneDevice): DeviceMemory => ({
+		read: (addr: number, size: number) => device.readFlash(addr, size),
+		write: (addr: number, data: Uint8Array) => device.writeFlash(addr, data),
+		flush: async () => {},
+		getMemoryStart: () => device.getMemoryStart(),
+		getMemorySize: () => device.getMemorySize(),
+	});
 
 	// The conversion (reading) phase alone is where it gets stuck.
 	{
@@ -1537,7 +1535,7 @@ test("vkp apply: readMemory()/writeMemory() routing refetches and rewrites the w
 		await device.disconnect();
 	}
 
-	// The write phase through writeMemory() has it even worse: every write
+	// The write phase through writeFlash() has it even worse: every write
 	// call drops the cache, re-fetches the whole block to update it and then
 	// erases and reprograms the whole block - one flash erase cycle per patch
 	// write instead of one per touched block.

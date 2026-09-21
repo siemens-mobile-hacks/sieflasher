@@ -816,34 +816,43 @@ export class PhoneDevice extends FlasherDeviceBase {
 		}
 	}
 
-	// Public operation entry points with the whole-operation progress.
-	// They address the flash by the offset from its start (the V_KLay
-	// "address 0xA15C0000 is 0x015C0000" form), unlike read()/write(), which
-	// take the device addresses of getMemoryStart().
+	// ------------------------------------------------------------------
+	// Flash access. There are two ways to touch the flash and the choice
+	// matters, because a block is the smallest unit the hardware can erase:
+	// changing a few bytes costs a whole read-erase-program cycle of the
+	// block that contains them.
 	//
-	// The page cache is dropped before every operation so that each
-	// Read Memory / Write Memory reflects the current phone state
-	// (V_KLay closes the device after each operation, which clears the cache).
-	async readMemory(offset: number, size: number): Promise<Uint8Array> {
+	// readFlash() and writeFlash() are one complete operation each. The page
+	// cache is dropped first, so a read always reflects the current phone
+	// state (V_KLay closes the device after each operation, which clears the
+	// cache), a write is flushed at the end, and the progress covers the
+	// whole operation. These are the Read Flash / Write Flash buttons.
+	//
+	// read(), write() and flush() of DeviceMemory are the steps of one longer
+	// operation instead. The cache lives until flush(), so many small writes
+	// into the same block cost one cycle in total rather than one each.
+	// Whatever drives a whole sequence of writes wants these, applyVkpToDevice()
+	// above all; routing it through the one-shot pair works but re-reads and
+	// reprograms the containing block for every single write of the patch.
+	//
+	// Both pairs take the device addresses the flash is mapped at
+	// (getMemoryStart(), 0xA0000000 on x65), like FullFlashDevice does. The
+	// loader itself addresses the flash by the offset from its start (the
+	// V_KLay "address 0xA15C0000 is 0x015C0000" form), which is what the
+	// private *AtOffset() pair below works with.
+
+	async readFlash(addr: number, size: number): Promise<Uint8Array> {
 		this.cache.clearCache();
-		return this.withProgress(size, true, () => this.readAtOffset(offset, size));
+		return this.withProgress(size, true, () => this.readAtOffset(addr - this.memoryStart, size));
 	}
 
-	async writeMemory(offset: number, data: Uint8Array): Promise<void> {
+	async writeFlash(addr: number, data: Uint8Array): Promise<void> {
 		this.cache.clearCache();
 		return this.withProgress(data.length, false, async () => {
-			await this.writeAtOffset(offset, data);
+			await this.writeAtOffset(addr - this.memoryStart, data);
 			await this.flush();
 		});
 	}
-
-	// ------------------------------------------------------------------
-	// Memory read/write
-	//
-	// The FlasherDevice methods take the device addresses the flash is mapped
-	// at (getMemoryStart(), 0xA0000000 on x65), like FullFlashDevice does;
-	// the loader itself addresses the flash by the offset from its start, so
-	// the *AtOffset() pair below is what the rest of the class works with.
 
 	async read(addr: number, size: number): Promise<Uint8Array> {
 		return this.readAtOffset(addr - this.memoryStart, size);
@@ -861,7 +870,7 @@ export class PhoneDevice extends FlasherDeviceBase {
 	}
 
 	// VDevicePhone::Read(), by the flash offset.
-	async readAtOffset(offset: number, size: number): Promise<Uint8Array> {
+	private async readAtOffset(offset: number, size: number): Promise<Uint8Array> {
 		this.checkRange(offset, size);
 		const result = Buffer.alloc(size);
 		let rest = size;
@@ -886,7 +895,7 @@ export class PhoneDevice extends FlasherDeviceBase {
 	}
 
 	// VDevicePhone::Write(), by the flash offset.
-	async writeAtOffset(offset: number, data: Uint8Array): Promise<void> {
+	private async writeAtOffset(offset: number, data: Uint8Array): Promise<void> {
 		this.checkRange(offset, data.length);
 		let rest = data.length;
 		let cursor = offset;

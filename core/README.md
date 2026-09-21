@@ -303,7 +303,7 @@ const vkd = parseVkd(fs.readFileSync("x65.vkd", "latin1"));
 const phone = vkd.phones[0];
 const device = new PhoneDevice(transport, phone, vkd.boots, { skipBootcore: true });
 await device.open(115200);
-const fullflash = await device.readMemory(0, phone.fullflash.size);
+const fullflash = await device.readFlash(device.getMemoryStart(), phone.fullflash.size);
 await device.disconnect();
 
 // Apply a VKP patch to a dump file

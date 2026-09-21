@@ -22,9 +22,7 @@ export const DeviceOperations = {
 // read() and write() address the device memory the way the device itself
 // is addressed: from getMemoryStart() to getMemoryStart() +
 // getMemorySize() (0xA0000000.. for the x65 flash, 0.. for a fullflash
-// dump that starts at the flash start). The flash-offset form of the
-// V_KLay addresses ("0xA15C0000 is 0x015C0000") is the *AtOffset() /
-// readMemory() / writeMemory() pair of PhoneDevice.
+// dump that starts at the flash start).
 export interface DeviceMemory {
 	read(addr: number, size: number): Promise<Uint8Array>;
 	// The written data may be buffered until flush() puts it on the device,
