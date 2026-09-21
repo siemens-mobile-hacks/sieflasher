@@ -4,7 +4,7 @@ import { Buffer } from "buffer";
 import { FlasherDeviceBase } from "./device.js";
 
 export class FullFlashDevice extends FlasherDeviceBase {
-	private buffer: Buffer;
+	private readonly buffer: Buffer;
 	private readonly partAddr: number;
 	private isModified = false;
 
