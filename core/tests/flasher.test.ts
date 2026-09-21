@@ -7,7 +7,7 @@ import { FlasherTransport } from '../src/transport.js';
 import { DeviceMemory } from '../src/device.js';
 import { parseVkd, VkdBoot } from '../src/vkd.js';
 import { PhoneDevice, xorChecksum, wordChecksum } from '../src/phone.js';
-import { FullFlashDevice } from '../src/fullflash.js';
+import { FlashDumpDevice } from '../src/flashdump.js';
 import { applyVkpToDevice, makeRepairPatchFileName, makeRepairPatchText } from '../src/vkp.js';
 import { vkpNormalize, vkpParse } from '@sie-js/vkp';
 import { MemCache } from '../src/memcache.js';
@@ -511,7 +511,7 @@ test("phone device: bootcore write skip", async () => {
 test("fullflash device", async () => {
 	const buf = Buffer.alloc(0x20000, 0xFF);
 	buf.write("HELLO", 0x100, "latin1");
-	const device = new FullFlashDevice(buf, 0x400000);
+	const device = new FlashDumpDevice(buf, 0x400000);
 	await device.open();
 	const data = await device.read(0x400100, 5);
 	assert.equal(Buffer.from(data).toString("latin1"), "HELLO");
@@ -524,7 +524,7 @@ test("fullflash device", async () => {
 
 test("vkp apply to fullflash", async () => {
 	const buf = Buffer.alloc(0x10000, 0xFF);
-	const device = new FullFlashDevice(buf, 0x400000);
+	const device = new FlashDumpDevice(buf, 0x400000);
 	await device.open();
 
 	const vkp = {
@@ -569,7 +569,7 @@ test("vkp apply to fullflash", async () => {
 
 test("vkp apply with mismatched old data", async () => {
 	const buf = Buffer.alloc(0x100, 0x00);
-	const device = new FullFlashDevice(buf, 0x400000);
+	const device = new FlashDumpDevice(buf, 0x400000);
 	await device.open();
 
 	const vkp = {
@@ -615,7 +615,7 @@ const makeVkp = (writes: any[]) => ({ valid: true, warnings: [], errors: [], wri
 test("vkp repair patch: confirmed mismatch saves a working restore patch", async () => {
 	const buf = Buffer.alloc(0x100, 0x00);
 	buf[0x10] = 0xAB; buf[0x11] = 0xCD;   // device data differs from the patch old data
-	const device = new FullFlashDevice(buf, 0x400000);
+	const device = new FlashDumpDevice(buf, 0x400000);
 	await device.open();
 
 	const vkp = makeVkp([makeWrite(0x400010, Buffer.from([0xFF, 0xFF]), Buffer.from([0x11, 0x22]))]);
@@ -678,7 +678,7 @@ test("vkp repair patch: confirmed mismatch saves a working restore patch", async
 
 test("vkp repair patch: declining the mismatch cancels the operation", async () => {
 	const buf = Buffer.alloc(0x100, 0x00);
-	const device = new FullFlashDevice(buf, 0x400000);
+	const device = new FlashDumpDevice(buf, 0x400000);
 	await device.open();
 
 	const vkp = makeVkp([makeWrite(0x400010, Buffer.from([0xFF, 0xFF]), Buffer.from([0x11, 0x22]))]);
@@ -696,7 +696,7 @@ test("vkp repair patch: declining the mismatch cancels the operation", async () 
 
 test("vkp repair patch: cancelling the repair patch save aborts", async () => {
 	const buf = Buffer.alloc(0x100, 0x00);
-	const device = new FullFlashDevice(buf, 0x400000);
+	const device = new FlashDumpDevice(buf, 0x400000);
 	await device.open();
 
 	const vkp = makeVkp([makeWrite(0x400010, Buffer.from([0xFF, 0xFF]), Buffer.from([0x11, 0x22]))]);
@@ -716,7 +716,7 @@ test("vkp repair patch: cancelling the repair patch save aborts", async () => {
 
 test("vkp repair patch: patch without old data (undo impossible)", async () => {
 	const buf = Buffer.alloc(0x100, 0xEE);
-	const device = new FullFlashDevice(buf, 0x400000);
+	const device = new FlashDumpDevice(buf, 0x400000);
 	await device.open();
 
 	const vkp = makeVkp([makeWrite(0x400020, undefined, Buffer.from([0x11, 0x22]))]);
@@ -746,7 +746,7 @@ test("vkp repair patch: patch without old data (undo impossible)", async () => {
 	assert.deepEqual(Buffer.from(buf.subarray(0x20, 0x22)), Buffer.from([0xEE, 0xEE]));
 
 	// Declining the warning cancels before anything is read or written.
-	const device2 = new FullFlashDevice(buf, 0x400000);
+	const device2 = new FlashDumpDevice(buf, 0x400000);
 	await device2.open();
 	const result2 = await applyVkpToDevice(device2, vkp, { confirmNoOld: () => false });
 	assert.ok(!result2.ok);
@@ -758,7 +758,7 @@ test("vkp repair patch: forced undo with mismatched patched data", async () => {
 	// The phone data is neither the patched nor the original data.
 	const buf = Buffer.alloc(0x100, 0x00);
 	buf[0x30] = 0x55; buf[0x31] = 0x66;
-	const device = new FullFlashDevice(buf, 0x400000);
+	const device = new FlashDumpDevice(buf, 0x400000);
 	await device.open();
 
 	const vkp = makeVkp([makeWrite(0x400030, Buffer.from([0xFF, 0xFF]), Buffer.from([0x11, 0x22]))]);
@@ -783,7 +783,7 @@ test("vkp repair patch: forced undo with mismatched patched data", async () => {
 test("vkp repair patch: undo of a patch without old data skips the writes", async () => {
 	const buf = Buffer.alloc(0x100, 0x00);
 	buf[0x40] = 0x11; buf[0x41] = 0x22;
-	const device = new FullFlashDevice(buf, 0x400000);
+	const device = new FlashDumpDevice(buf, 0x400000);
 	await device.open();
 
 	// A write without old data cannot be undone: after the confirmed
@@ -866,7 +866,7 @@ test("vkp apply: patch addresses are flash offsets, never CPU addresses", async 
 	// out of the flash and is rejected, not quietly relocated.
 	const buf = Buffer.alloc(0x2000000, 0xFF);
 	buf.write("CODE", 0xA165E8, "latin1");
-	const device = new FullFlashDevice(buf);
+	const device = new FlashDumpDevice(buf);
 	await device.open();
 
 	const makeVkp = (addr: number) => ({
@@ -899,7 +899,7 @@ test("vkp apply: patch addresses are flash offsets, never CPU addresses", async 
 
 test("vkp apply: patch with errors is not reported as already applied", async () => {
 	const buf = Buffer.alloc(0x10000, 0xFF);
-	const device = new FullFlashDevice(buf, 0x400000);
+	const device = new FlashDumpDevice(buf, 0x400000);
 	await device.open();
 
 	const write = (addr: number) => ({

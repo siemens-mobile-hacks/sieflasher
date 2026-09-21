@@ -6,7 +6,7 @@ import { FlasherDeviceBase } from "./device.js";
 // A dump need not cover the whole flash: startOffset is the flash offset its
 // first byte was read from, so that a patch addresses the same byte in the
 // dump and in the phone it came from.
-export class FullFlashDevice extends FlasherDeviceBase {
+export class FlashDumpDevice extends FlasherDeviceBase {
 	private readonly buffer: Buffer;
 	private readonly startOffset: number;
 	private isModified = false;

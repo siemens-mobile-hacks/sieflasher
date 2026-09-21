@@ -42,7 +42,7 @@ src/                Platform independent library (works in browser and Node.js)
 	vkd.ts          .vkd phone driver file model and parser
 	memcache.ts     Paged flash memory cache (VDevCache port)
 	device.ts       DeviceMemory / FlasherDevice contracts, V_KLay dump file naming
-	fullflash.ts    Fullflash dump (.bin) as a device (VDeviceFile port)
+	flashdump.ts    Fullflash dump (.bin) as a device (VDeviceFile port)
 	phone.ts        The phone flasher itself: boot sequence, loader protocol,
 	                memory read/write, bootcore restore (VDevicePhone port)
 	transport.ts    FlasherTransport interface (serial port abstraction)
@@ -297,7 +297,7 @@ and a TCP transport for the pmb887x-emu emulator are planned, exercised by the
 [e2e tests](../tests)):
 
 ```ts
-import { parseVkd, PhoneDevice, applyVkpToDevice, FullFlashDevice, diffBuffers } from "@sie-js/flasher";
+import { parseVkd, PhoneDevice, applyVkpToDevice, FlashDumpDevice, diffBuffers } from "@sie-js/flasher";
 import { vkpNormalize, vkpParse } from "@sie-js/vkp";
 import { SerialPort } from "serialport";
 
@@ -316,7 +316,7 @@ await device.disconnect();
 
 // Apply a VKP patch to a dump file (the second argument is the flash offset
 // the dump starts at, for a dump of a part of the flash)
-const dump = new FullFlashDevice(fs.readFileSync("fullflash.bin"));
+const dump = new FlashDumpDevice(fs.readFileSync("fullflash.bin"));
 const vkp = vkpParse(vkpNormalize(fs.readFileSync("patch.vkp")));
 const result = await applyVkpToDevice(dump, vkp, { dryRun: true });
 

@@ -15,7 +15,7 @@ import { createInterface } from "node:readline/promises";
 import { Buffer } from "node:buffer";
 import { Readable } from "node:stream";
 import {
-	applyVkpToDevice, FlasherDevice, FlasherTransport, FullFlashDevice, getAddrFromFileName,
+	applyVkpToDevice, FlasherDevice, FlasherTransport, FlashDumpDevice, getAddrFromFileName,
 	hexPreview, PhoneDevice, phoneDisplayName, VkpApplyResult, VkpMismatchInfo, VkpWriteReport,
 } from "@sie-js/flasher";
 import { vkpDetectContent, vkpNormalize, vkpParse, VkpParseResult } from "@sie-js/vkp";
@@ -116,7 +116,7 @@ async function runPatch(args: string[], revert: boolean): Promise<number> {
 
 	let device: FlasherDevice;
 	let phone: PhoneDevice | undefined;
-	let dump: { buffer: Buffer; device: FullFlashDevice } | undefined;
+	let dump: { buffer: Buffer; device: FlashDumpDevice } | undefined;
 	let phoneInfo: ReturnType<PhoneDevice["getFlashInfo"]>;
 	let loaderPhoneName = "";
 
@@ -140,7 +140,7 @@ async function runPatch(args: string[], revert: boolean): Promise<number> {
 			console.error(`sieflasher: ${patchSource}: ${outside} of the dump ${formatRange(baseAddr, buffer.length)}`);
 			return 1;
 		}
-		const fullflash = new FullFlashDevice(buffer, baseAddr);
+		const fullflash = new FlashDumpDevice(buffer, baseAddr);
 		dump = { buffer, device: fullflash };
 		device = fullflash;
 		await fullflash.open();
@@ -262,7 +262,7 @@ async function runPatch(args: string[], revert: boolean): Promise<number> {
 				: (loaderPhoneName || phoneInfo?.model || ""),
 			imei: phoneInfo?.kind == "v3" ? phoneInfo.imei : "",
 			// V_KLay logs VDevice::GetUniqueName(); for a dump the file name
-			// says more than the "fulldump_<addr>" of FullFlashDevice.
+			// says more than the "fulldump_<addr>" of FlashDumpDevice.
 			deviceName: options.file
 				? path.basename(options.file).replace(/\.(bin|fls|ful)$/i, "")
 				: device.getUniqueName(),

@@ -15,7 +15,7 @@ export * from "./data.js";
 export * from "./vkd.js";
 export * from "./memcache.js";
 export * from "./device.js";
-export * from "./fullflash.js";
+export * from "./flashdump.js";
 export * from "./phone.js";
 export * from "./transport.js";
 export * from "./vkp.js";

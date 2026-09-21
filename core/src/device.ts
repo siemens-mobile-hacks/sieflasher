@@ -1,6 +1,6 @@
 // Device abstraction (port of VDevice from VDevice.cpp).
 // A device is anything the flasher can read from / write to:
-// a real phone (PhoneDevice) or a fullflash dump file (FullFlashDevice).
+// a real phone (PhoneDevice) or a fullflash dump file (FlashDumpDevice).
 
 
 export interface DeviceProgress {
