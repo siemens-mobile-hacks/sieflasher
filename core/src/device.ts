@@ -15,10 +15,48 @@ export const DeviceOperations = {
 	RESTORE_BOOTCORE: 0x04,
 } as const;
 
-export abstract class FlasherDevice {
+// The memory of a device, which is all an algorithm working on it needs
+// (applyVkpToDevice, for one). Any FlasherDevice qualifies, and so does a
+// plain object delegating to one, e.g. across a worker boundary.
+//
+// read() and write() address the device memory the way the device itself
+// is addressed: from getMemoryStart() to getMemoryStart() +
+// getMemorySize() (0xA0000000.. for the x65 flash, 0.. for a fullflash
+// dump that starts at the flash start). The flash-offset form of the
+// V_KLay addresses ("0xA15C0000 is 0x015C0000") is the *AtOffset() /
+// readMemory() / writeMemory() pair of PhoneDevice.
+export interface DeviceMemory {
+	read(addr: number, size: number): Promise<Uint8Array>;
+	// The written data may be buffered until flush() puts it on the device,
+	// so that an operation costs one read and one write per touched block.
+	write(addr: number, data: Uint8Array): Promise<void>;
+	flush(): Promise<void>;
+
+	getMemorySize(): number;
+	getMemoryStart(): number;
+}
+
+// A complete device backend. Implementations extend FlasherDeviceBase, which
+// carries the progress and cancellation plumbing.
+export interface FlasherDevice extends DeviceMemory {
 	// Progress callback, optional.
 	onProgress?: (progress: DeviceProgress) => void;
 	// Cancellation check, optional.
+	isCanceled?: () => boolean;
+
+	open(): Promise<void>;
+	close(): Promise<void>;
+	abort(): Promise<void>;
+
+	// Restore bootcore of the phone to its original state.
+	restoreBootcore(): Promise<void>;
+
+	getUniqueName(): string;
+	getSupportedOperations(): number;
+}
+
+export abstract class FlasherDeviceBase implements FlasherDevice {
+	onProgress?: (progress: DeviceProgress) => void;
 	isCanceled?: () => boolean;
 
 	protected checkCancel(): void {
@@ -33,18 +71,11 @@ export abstract class FlasherDevice {
 	abstract open(): Promise<void>;
 	abstract close(): Promise<void>;
 
-	// read() and write() address the device memory the way the device itself
-	// is addressed: from getMemoryStart() to getMemoryStart() +
-	// getMemorySize() (0xA0000000.. for the x65 flash, 0.. for a fullflash
-	// dump that starts at the flash start). The flash-offset form of the
-	// V_KLay addresses ("0xA15C0000 is 0x015C0000") is the *AtOffset() /
-	// readMemory() / writeMemory() pair of PhoneDevice.
 	abstract read(addr: number, size: number): Promise<Uint8Array>;
 	abstract write(addr: number, data: Uint8Array): Promise<void>;
 	abstract flush(): Promise<void>;
 	abstract abort(): Promise<void>;
 
-	// Restore bootcore of the phone to its original state.
 	async restoreBootcore(): Promise<void> {
 		throw new Error("This device does not support bootcore restoring.");
 	}

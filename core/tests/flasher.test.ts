@@ -4,7 +4,7 @@ import { Buffer } from 'node:buffer';
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { FlasherTransport } from '../src/transport.js';
-import { FlasherDevice } from '../src/device.js';
+import { DeviceMemory } from '../src/device.js';
 import { parseVkd, VkdBoot } from '../src/vkd.js';
 import { PhoneDevice, xorChecksum, wordChecksum } from '../src/phone.js';
 import { FullFlashDevice } from '../src/fullflash.js';
@@ -1510,7 +1510,7 @@ test("vkp apply: readMemory()/writeMemory() routing refetches and rewrites the w
 	// patch write; for this patch thousands of full-block reads instead of
 	// one per touched block, each visible as a repeated "Reading 0x..."
 	// line.
-	const operationWrapper = (device: PhoneDevice) => {
+	const operationWrapper = (device: PhoneDevice): DeviceMemory => {
 		const base = device.getMemoryStart();
 		return {
 			read: (addr: number, size: number) => device.readMemory(addr - base, size),
@@ -1518,7 +1518,7 @@ test("vkp apply: readMemory()/writeMemory() routing refetches and rewrites the w
 			flush: async () => {},
 			getMemoryStart: () => device.getMemoryStart(),
 			getMemorySize: () => device.getMemorySize(),
-		} as FlasherDevice;
+		};
 	};
 
 	// The conversion (reading) phase alone is where it gets stuck.

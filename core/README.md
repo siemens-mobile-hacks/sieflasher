@@ -41,7 +41,7 @@ src/                Platform independent library (works in browser and Node.js)
 	data.ts         Parsing of the vkd data values (0sAT escape strings, hex, 0b, 0x)
 	vkd.ts          .vkd phone driver file model and parser
 	memcache.ts     Paged flash memory cache (VDevCache port)
-	device.ts       FlasherDevice abstraction, V_KLay dump file naming
+	device.ts       DeviceMemory / FlasherDevice contracts, V_KLay dump file naming
 	fullflash.ts    Fullflash dump (.bin) as a device (VDeviceFile port)
 	phone.ts        The phone flasher itself: boot sequence, loader protocol,
 	                memory read/write, bootcore restore (VDevicePhone port)

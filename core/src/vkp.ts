@@ -15,7 +15,7 @@
 import { Buffer } from "buffer";
 import { sprintf } from "sprintf-js";
 import { VkpParseResult, VkpWrite } from "@sie-js/vkp";
-import { FlasherDevice } from "./device.js";
+import { DeviceMemory } from "./device.js";
 
 export interface VkpWriteReport {
 	addr: number;
@@ -134,7 +134,7 @@ function noOldWarningSuppressed(write: VkpWrite, revert: boolean): boolean {
 	return !revert && write.pragmas?.warn_no_old_on_apply === false;
 }
 
-export async function applyVkpToDevice(device: FlasherDevice, vkp: VkpParseResult, options: VkpApplyOptions = {}): Promise<VkpApplyResult> {
+export async function applyVkpToDevice(device: DeviceMemory, vkp: VkpParseResult, options: VkpApplyOptions = {}): Promise<VkpApplyResult> {
 	const revert = !!options.revert;
 	const dryRun = !!options.dryRun;
 	const force = !!options.force;

@@ -10,7 +10,7 @@
 import { Buffer } from "buffer";
 import { sprintf } from "sprintf-js";
 import createDebug from "debug";
-import { FlasherAbortError, FlasherDevice, DeviceOperations } from "./device.js";
+import { FlasherAbortError, FlasherDeviceBase, DeviceOperations } from "./device.js";
 import { MemCache } from "./memcache.js";
 import { FlasherTransport } from "./transport.js";
 import { MemGeometry, VkdBoot, VkdFile, VkdPhone } from "./vkd.js";
@@ -124,7 +124,7 @@ export class PhoneDeviceError extends Error {
 	}
 }
 
-export class PhoneDevice extends FlasherDevice {
+export class PhoneDevice extends FlasherDeviceBase {
 	readonly phone: VkdPhone;
 	private readonly transport: FlasherTransport;
 	private readonly bootsByName: Map<string, VkdBoot>;

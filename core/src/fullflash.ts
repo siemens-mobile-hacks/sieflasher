@@ -1,9 +1,9 @@
 // Fullflash dump file as a device (port of VDeviceFile from VDeviceFile.cpp).
 
 import { Buffer } from "buffer";
-import { FlasherDevice } from "./device.js";
+import { FlasherDeviceBase } from "./device.js";
 
-export class FullFlashDevice extends FlasherDevice {
+export class FullFlashDevice extends FlasherDeviceBase {
 	private buffer: Buffer;
 	private readonly partAddr: number;
 	private isModified = false;
