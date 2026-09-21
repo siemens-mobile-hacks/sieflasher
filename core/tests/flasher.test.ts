@@ -1,12 +1,15 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Buffer } from 'node:buffer';
+import { existsSync, readFileSync } from 'node:fs';
+import path from 'node:path';
 import { FlasherTransport } from '../src/transport.js';
+import { FlasherDevice } from '../src/device.js';
 import { parseVkd, VkdBoot } from '../src/vkd.js';
 import { PhoneDevice, xorChecksum, wordChecksum } from '../src/phone.js';
 import { FullFlashDevice } from '../src/fullflash.js';
 import { applyVkpToDevice, makeRepairPatchFileName, makeRepairPatchText } from '../src/vkp.js';
-import { vkpParse } from '@sie-js/vkp';
+import { vkpNormalize, vkpParse } from '@sie-js/vkp';
 import { MemCache } from '../src/memcache.js';
 import { IniFile } from '../src/ini.js';
 import { parseVkdData, parseEscapeString } from '../src/data.js';
@@ -1345,4 +1348,217 @@ test("phone device: repeated reads always fetch fresh data from the phone", asyn
 		"the second read must return the updated phone data");
 
 	await device.disconnect();
+});
+
+// ---------------------------------------------------------------------
+// Applying a real multi-block patch over the mock phone.
+//
+// The E71 bootscreen patch of the patches submodule consists of thousands
+// of small writes (1..16 bytes) spread over several flash blocks. It is
+// applied to the fullflash of a different phone (EL71), so the old data of
+// every write mismatches and the apply runs through the confirmed-mismatch
+// path. This is the patch of the "web tools get stuck on reading the block"
+// report; the tests below pin the block traffic the patch engine is allowed
+// to produce.
+
+const MULTIBLOCK_PATCH_FILE = path.resolve(process.cwd(), "..", "tests",
+	"patches", "patches", "E71v45", "10772-BS_SM_Black_E71sw45_fixed2.vkp");
+const OTHER_PHONE_DUMP_FILE = path.resolve(process.cwd(), "..", "tests",
+	"fullflashes", "EL71v41lg91.bin");
+
+// The flash block size reported by the mock loader in its flash info.
+const BLOCK_SIZE = 0x20000;
+
+// Mock transport that corrupts the checksum of the next block data answer,
+// so the loader hits a "Received data CRC error" exactly once and has to
+// retry the chunk.
+class CrcCorruptingTransport extends MockTransportX65 {
+	corruptNextDataAnswer = false;
+
+	async read(size: number, timeoutMS: number): Promise<Buffer | undefined> {
+		const answer = await super.read(size, timeoutMS);
+		// The block read answers (data + OK + checksum) are the only big reads
+		// on the wire; flip the last checksum byte of the next one.
+		if (answer && this.corruptNextDataAnswer && size > 1024) {
+			this.corruptNextDataAnswer = false;
+			answer[answer.length - 1] ^= 0xFF;
+		}
+		return answer;
+	}
+}
+
+// A connected phone whose flash holds the dump of another phone, with the
+// loader block operations counted: every loaderReadMemory() call is one
+// block fetch from the phone (the "Reading 0x...-0x... (131072 bytes)"
+// log lines), every loaderWriteMemory() call one block erase+program.
+async function makeForeignFlashPhone(corruptFirstChunk = false) {
+	const vkd = parseVkd(VKD_X65);
+	const phone = vkd.phones[0];
+	const mock = new MockPhoneX65(phone.fullflash.size);
+	const dump = readFileSync(OTHER_PHONE_DUMP_FILE);
+	dump.copy(mock.flash, 0);
+	const transport = new CrcCorruptingTransport(mock);
+	transport.corruptNextDataAnswer = corruptFirstChunk;
+	const device = new PhoneDevice(transport, phone, vkd.boots);
+	await device.open(115200);
+
+	const blockReads: number[] = [];
+	const blockWrites: number[] = [];
+	const origRead = device.loaderReadMemory.bind(device);
+	const origWrite = device.loaderWriteMemory.bind(device);
+	device.loaderReadMemory = async (addr, size, out) => {
+		blockReads.push(addr);
+		return origRead(addr, size, out);
+	};
+	device.loaderWriteMemory = async (addr, size, data) => {
+		blockWrites.push(addr);
+		return origWrite(addr, size, data);
+	};
+	return { device, mock, dump, blockReads, blockWrites };
+}
+
+function loadMultiblockPatch() {
+	const vkp = vkpParse(vkpNormalize(readFileSync(MULTIBLOCK_PATCH_FILE)), { allowEmptyOldData: true });
+	assert.ok(vkp.valid, "the patch must parse");
+	// The flash blocks the patch writes touch (V_KLay offsets).
+	const pages = [...new Set(vkp.writes.map((w) => w.addr & ~(BLOCK_SIZE - 1)))].sort((a, b) => a - b);
+	return { vkp, pages };
+}
+
+const multiblockDataAvailable = () => existsSync(MULTIBLOCK_PATCH_FILE) && existsSync(OTHER_PHONE_DUMP_FILE);
+
+const skipWithoutMultiblockData = (t: { skip(message?: string): void }) =>
+	t.skip(`needs the test data of the sieflasher checkout: ${MULTIBLOCK_PATCH_FILE}, ${OTHER_PHONE_DUMP_FILE}`);
+
+test("vkp apply: a patch spanning multiple blocks reads and writes every block exactly once", async (t) => {
+	if (!multiblockDataAvailable()) {
+		skipWithoutMultiblockData(t);
+		return;
+	}
+	const { vkp, pages } = loadMultiblockPatch();
+	assert.ok(vkp.writes.length > 1000, "the patch must consist of many small writes");
+	assert.ok(pages.length >= 2, "the patch must span several flash blocks");
+	const totalBytes = vkp.writes.reduce((sum, w) => sum + w.new.length, 0);
+
+	const { device, mock, dump, blockReads, blockWrites } = await makeForeignFlashPhone(true);
+
+	// None of the patch old data is in the flash of the other phone: the
+	// whole apply runs through the confirmed-mismatch path.
+	let mismatches = 0;
+	const result = await applyVkpToDevice(device, vkp, {
+		confirmNoOld: () => true,
+		confirmMismatch: () => {
+			mismatches++;
+			return true;
+		},
+	});
+	assert.ok(result.ok);
+	assert.equal(mismatches, 1);
+	assert.equal(result.read, totalBytes);
+	assert.equal(result.written, totalBytes);
+
+	// Every touched block was fetched from the phone exactly once and
+	// erased+programmed exactly once - despite the one injected chunk CRC
+	// error, which was retried inside the very block read it happened in.
+	assert.deepEqual([...blockReads].sort((a, b) => a - b), pages,
+		"one block fetch per touched block");
+	assert.deepEqual([...blockWrites].sort((a, b) => a - b), pages,
+		"one block erase+program per touched block");
+	assert.equal(device.errorsCorrectedCount, 1);
+
+	// The loader really saw one whole-block write per touched block.
+	assert.equal(mock.writes.length, pages.length);
+	for (const page of pages)
+		assert.ok(mock.writes.some((w) => w.addr == 0xA0000000 + page),
+			`the block at 0x${page.toString(16)} was written as one block`);
+
+	// The new data of every write landed in the flash at its address...
+	for (const w of vkp.writes) {
+		if (!mock.flash.subarray(w.addr, w.addr + w.new.length).equals(w.new))
+			assert.fail(`the new data of the write at 0x${w.addr.toString(16)} is not in the flash`);
+	}
+	// ...and nothing outside the writes changed: the rewritten blocks kept
+	// the original data of the dump everywhere else.
+	const covered = new Uint8Array(mock.flash.length);
+	for (const w of vkp.writes)
+		covered.fill(1, w.addr, w.addr + w.new.length);
+	let changedOutside = -1;
+	for (let i = 0; i < mock.flash.length && changedOutside == -1; i++) {
+		if (!covered[i] && mock.flash[i] != dump[i])
+			changedOutside = i;
+	}
+	assert.equal(changedOutside, -1,
+		`byte 0x${changedOutside == -1 ? "" : changedOutside.toString(16)} outside of the writes changed`);
+
+	await device.disconnect();
+});
+
+test("vkp apply: readMemory()/writeMemory() routing refetches and rewrites the whole block for every write", async (t) => {
+	if (!multiblockDataAvailable()) {
+		skipWithoutMultiblockData(t);
+		return;
+	}
+	const { vkp, pages } = loadMultiblockPatch();
+	const totalBytes = vkp.writes.reduce((sum, w) => sum + w.new.length, 0);
+
+	// How the web tools drove the patch engine when applying this patch got
+	// stuck "on reading the block": every per-write read()/write() of the
+	// engine was routed through PhoneDevice.readMemory()/writeMemory() - the
+	// operation-level API which drops the whole page cache before every call
+	// (so that a Read Memory always reflects the current phone state). The
+	// containing block is then fetched from the phone again for every single
+	// patch write; for this patch thousands of full-block reads instead of
+	// one per touched block, each visible as a repeated "Reading 0x..."
+	// line.
+	const operationWrapper = (device: PhoneDevice) => {
+		const base = device.getMemoryStart();
+		return {
+			read: (addr: number, size: number) => device.readMemory(addr - base, size),
+			write: (addr: number, data: Uint8Array) => device.writeMemory(addr - base, data),
+			flush: async () => {},
+			getMemoryStart: () => device.getMemoryStart(),
+			getMemorySize: () => device.getMemorySize(),
+		} as FlasherDevice;
+	};
+
+	// The conversion (reading) phase alone is where it gets stuck.
+	{
+		const { device, blockReads, blockWrites } = await makeForeignFlashPhone();
+		const result = await applyVkpToDevice(operationWrapper(device), vkp, {
+			dryRun: true,
+			confirmNoOld: () => true,
+			confirmMismatch: () => true,
+		});
+		assert.ok(result.ok);
+		assert.equal(blockReads.length, vkp.writes.length,
+			"one whole block fetch per patch write instead of one per touched block");
+		assert.deepEqual([...new Set(blockReads)].sort((a, b) => a - b), pages);
+		assert.equal(blockWrites.length, 0);
+		await device.disconnect();
+	}
+
+	// The write phase through writeMemory() has it even worse: every write
+	// call drops the cache, re-fetches the whole block to update it and then
+	// erases and reprograms the whole block - one flash erase cycle per patch
+	// write instead of one per touched block.
+	{
+		const { device, mock, blockReads, blockWrites } = await makeForeignFlashPhone();
+		const result = await applyVkpToDevice(operationWrapper(device), vkp, {
+			confirmNoOld: () => true,
+			confirmMismatch: () => true,
+		});
+		assert.ok(result.ok);
+		assert.equal(result.written, totalBytes);
+		assert.equal(blockReads.length, 2 * vkp.writes.length,
+			"one whole block fetch per patch write in each phase");
+		assert.equal(blockWrites.length, vkp.writes.length,
+			"one whole-block erase+program per patch write");
+		// The routing is functionally correct, just catastrophic: the new data
+		// of every write still lands in the flash.
+		for (const w of vkp.writes) {
+			if (!mock.flash.subarray(w.addr, w.addr + w.new.length).equals(w.new))
+				assert.fail(`the new data of the write at 0x${w.addr.toString(16)} is not in the flash`);
+		}
+		await device.disconnect();
+	}
 });
