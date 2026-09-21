@@ -133,7 +133,8 @@ After the boots, the loader in the phone answers single-character commands
 | `Q`, `Z` | stop the loader | `LoaderStopLoader()` |
 
 The address/size fields are `optCmdAddrAndSizeLen` bytes wide, big-endian, and
-absolute (`address + fullflash base`). Everything that varies between the
+carry the device address the flash is mapped at (0xA0000000 on x65), not the
+flash offset the library is addressed by. Everything that varies between the
 driver generations is controlled by the `opt*` keys: skip bytes after each
 answer field, checksum type and order, OK-answer presence, write command
 version, keepalive interval, baud code table, and so on.
@@ -218,10 +219,15 @@ warnings):
 * **Addresses** follow the V_KLay convention: patch addresses are **offsets
   from the flash start** ("address 0xA15C0000 is 0x015C0000 in V_KLay"),
   which is the form x65/x75 patches use (`0xA165E8` → flash offset, not the
-  absolute `0xA0A165E8`). When the flash base is not 0 and the whole patch
-  fits the flash only as offsets, the addresses are shifted by the base
-  automatically (the manual V_KLay `PatcherWrapAddr` option); patches written
-  with absolute addresses keep working as-is.
+  absolute `0xA0A165E8`), and they are used as they are — every one of the
+  2,007,746 writes of the 10,317-patch corpus in `tests/patches` is an offset.
+  `PhoneDevice` adds the address the flash is mapped at (0xA0000000 on x65)
+  once, at its own boundary; nothing above it deals in device addresses. A
+  write outside `getMemoryStart() .. getMemoryStart() + getMemorySize()` is
+  reported as an error, never relocated to make it fit.
+* The **`+XXXX` offset corrector** of the VKP format is applied by the parser
+  (`vkpParse`), so the addresses reaching this library are already corrected.
+  It sets the correction rather than accumulating it, and `+0` cancels it.
 * **Undo** reverses the logic (old data must be present, patched data is
   replaced by the old data).
 * **Dry run** only reports. The result contains per-write reports and byte
@@ -303,11 +309,14 @@ const vkd = parseVkd(fs.readFileSync("x65.vkd", "latin1"));
 const phone = vkd.phones[0];
 const device = new PhoneDevice(transport, phone, vkd.boots, { skipBootcore: true });
 await device.open(115200);
-const fullflash = await device.readFlash(device.getMemoryStart(), phone.fullflash.size);
+// Addresses are offsets from the flash start, like in the patches and in
+// the V_KLay fields: the whole flash is 0 .. device.getMemorySize().
+const fullflash = await device.readFlash(0, device.getMemorySize());
 await device.disconnect();
 
-// Apply a VKP patch to a dump file
-const dump = new FullFlashDevice(fs.readFileSync("fullflash.bin"), 0xA0000000);
+// Apply a VKP patch to a dump file (the second argument is the flash offset
+// the dump starts at, for a dump of a part of the flash)
+const dump = new FullFlashDevice(fs.readFileSync("fullflash.bin"));
 const vkp = vkpParse(vkpNormalize(fs.readFileSync("patch.vkp")));
 const result = await applyVkpToDevice(dump, vkp, { dryRun: true });
 

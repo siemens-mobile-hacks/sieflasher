@@ -344,9 +344,11 @@ test('a patch reaching outside of the flash is rejected before the phone is open
 	writeFileSync(patch, '0x1000000: 41414141 42424242\r\n', 'latin1');
 
 	// The serial port is never opened: the addresses are checked first.
+	// The flash is mapped at 0x400000 on this phone, but a patch addresses it
+	// by the offset, so the range it is checked against is 0x0..0xBFFFFF.
 	const result = run(env, ['apply', '--serial', 'tcp://127.0.0.1:1', '--loader', vkd, patch]);
 	assert.equal(result.status, 1);
-	assert.match(result.stderr, /1 of 1 write\(s\) are outside .* of the fullflash 0x400000\.\.0xFFFFFF/);
+	assert.match(result.stderr, /1 of 1 write\(s\) are outside .* of the fullflash 0x0\.\.0xBFFFFF/);
 	assert.doesNotMatch(result.stderr, /cannot open/);
 	assert.deepEqual(history(env), []);
 });

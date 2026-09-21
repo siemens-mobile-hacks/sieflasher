@@ -13,7 +13,7 @@ import createDebug from "debug";
 import { FlasherAbortError, FlasherDeviceBase, DeviceOperations } from "./device.js";
 import { MemCache } from "./memcache.js";
 import { FlasherTransport } from "./transport.js";
-import { MemGeometry, VkdBoot, VkdFile, VkdPhone } from "./vkd.js";
+import { MemArea, MemGeometry, VkdBoot, VkdFile, VkdPhone } from "./vkd.js";
 
 const debug = createDebug("flasher");
 const debugTrx = createDebug("flasher:trx");
@@ -158,7 +158,11 @@ export class PhoneDevice extends FlasherDeviceBase {
 		};
 	}
 
-	get memoryStart(): number {
+	// The address the phone CPU reaches the flash start at (0xA0000000 on x65).
+	// Everything this class takes and returns is addressed by the flash offset
+	// instead; this is what turns one into the other, and nothing outside
+	// needs it except to show the user where the flash sits.
+	get deviceAddressBase(): number {
 		return this.phone.fullflash.addr;
 	}
 
@@ -166,16 +170,20 @@ export class PhoneDevice extends FlasherDeviceBase {
 		return this.phone.fullflash.size;
 	}
 
+	// A phone always exposes its whole flash, so the first offset is 0.
 	getMemoryStart(): number {
-		return this.memoryStart;
+		return 0;
 	}
 
 	getMemorySize(): number {
 		return this.memorySize;
 	}
 
-	get memAreas() {
-		return this.phone.memAreas;
+	// The driver memory areas, by the flash offset like everything else here
+	// (the driver file itself states them as device addresses).
+	get memAreas(): MemArea[] {
+		const base = this.deviceAddressBase;
+		return this.phone.memAreas.map((area) => ({ ...area, addr: area.addr - base }));
 	}
 
 	get memGeometry(): MemGeometry[] {
@@ -213,7 +221,6 @@ export class PhoneDevice extends FlasherDeviceBase {
 		this.errorsCorrected = 0;
 		this.lastGoodPageSize = VDP_READ_PAGE_SIZE_START;
 		this.cache = new MemCache();
-		this.cache.setMemAreaStart(this.memoryStart);
 		this.cache.setGeometry(this.phone.memGeometry);
 		this.phoneInfo = undefined;
 		this.phoneInfoRaw = undefined;
@@ -601,6 +608,9 @@ export class PhoneDevice extends FlasherDeviceBase {
 			return;
 		this.keepaliveTicks = 0;
 		this.keepaliveTimer = setInterval(() => this.keepaliveTick(), VD_KEEPALIVE_TICK);
+		// A phone left connected must not be what keeps a Node process alive
+		// (the browser timer has no unref()).
+		(this.keepaliveTimer as { unref?: () => void }).unref?.();
 	}
 
 	private stopKeepalive(): void {
@@ -835,46 +845,50 @@ export class PhoneDevice extends FlasherDeviceBase {
 	// above all; routing it through the one-shot pair works but re-reads and
 	// reprograms the containing block for every single write of the patch.
 	//
-	// Both pairs take the device addresses the flash is mapped at
-	// (getMemoryStart(), 0xA0000000 on x65), like FullFlashDevice does. The
-	// loader itself addresses the flash by the offset from its start (the
-	// V_KLay "address 0xA15C0000 is 0x015C0000" form), which is what the
-	// private *AtOffset() pair below works with.
+	// Both pairs take the offset from the flash start, the form V_KLay shows
+	// and VKP patches are written in ("address 0xA15C0000 is 0x015C0000").
+	// The flash is mapped into the phone address space at deviceAddressBase,
+	// and the loader, the driver geometry and the memory areas all speak
+	// those device addresses - so the offset is converted here, once, and
+	// everything below this point works in device addresses.
 
-	async readFlash(addr: number, size: number): Promise<Uint8Array> {
+	async readFlash(offset: number, size: number): Promise<Uint8Array> {
+		this.checkRange(offset, size);
 		this.cache.clearCache();
-		return this.withProgress(size, true, () => this.readAtOffset(addr - this.memoryStart, size));
+		return this.withProgress(size, true, () => this.readAtAddress(this.deviceAddressBase + offset, size));
 	}
 
-	async writeFlash(addr: number, data: Uint8Array): Promise<void> {
+	async writeFlash(offset: number, data: Uint8Array): Promise<void> {
+		this.checkRange(offset, data.length);
 		this.cache.clearCache();
 		return this.withProgress(data.length, false, async () => {
-			await this.writeAtOffset(addr - this.memoryStart, data);
+			await this.writeAtAddress(this.deviceAddressBase + offset, data);
 			await this.flush();
 		});
 	}
 
-	async read(addr: number, size: number): Promise<Uint8Array> {
-		return this.readAtOffset(addr - this.memoryStart, size);
+	async read(offset: number, size: number): Promise<Uint8Array> {
+		this.checkRange(offset, size);
+		return this.readAtAddress(this.deviceAddressBase + offset, size);
 	}
 
-	async write(addr: number, data: Uint8Array): Promise<void> {
-		return this.writeAtOffset(addr - this.memoryStart, data);
+	async write(offset: number, data: Uint8Array): Promise<void> {
+		this.checkRange(offset, data.length);
+		return this.writeAtAddress(this.deviceAddressBase + offset, data);
 	}
 
 	private checkRange(offset: number, size: number): void {
 		if (offset < 0 || size < 0 || offset + size > this.memorySize)
 			throw new PhoneDeviceError(sprintf(
-				"Address 0x%08X (size 0x%X) is outside of the phone memory 0x%08X-0x%08X.",
-				(offset + this.memoryStart) >>> 0, size, this.memoryStart >>> 0, (this.memoryStart + this.memorySize) >>> 0));
+				"Offset 0x%X (size 0x%X) is outside of the phone memory 0x0-0x%X (device address 0x%08X).",
+				offset, size, this.memorySize, (this.deviceAddressBase + offset) >>> 0));
 	}
 
-	// VDevicePhone::Read(), by the flash offset.
-	private async readAtOffset(offset: number, size: number): Promise<Uint8Array> {
-		this.checkRange(offset, size);
+	// VDevicePhone::Read()
+	private async readAtAddress(address: number, size: number): Promise<Uint8Array> {
 		const result = Buffer.alloc(size);
 		let rest = size;
-		let cursor = offset;
+		let cursor = address;
 		while (rest > 0) {
 			this.checkCancel();
 			const entry = this.cache.getPageAtAddr(cursor);
@@ -894,11 +908,10 @@ export class PhoneDevice extends FlasherDeviceBase {
 		return result;
 	}
 
-	// VDevicePhone::Write(), by the flash offset.
-	private async writeAtOffset(offset: number, data: Uint8Array): Promise<void> {
-		this.checkRange(offset, data.length);
+	// VDevicePhone::Write()
+	private async writeAtAddress(address: number, data: Uint8Array): Promise<void> {
 		let rest = data.length;
-		let cursor = offset;
+		let cursor = address;
 		let dataOffset = 0;
 		while (rest > 0) {
 			this.checkCancel();
@@ -950,7 +963,7 @@ export class PhoneDevice extends FlasherDeviceBase {
 		for (const area of this.phone.memAreas) {
 			if (!area.isBootcore && !area.isNoWrite)
 				continue;
-			const beg = area.addr - this.memoryStart;
+			const beg = area.addr;
 			const areaEnd = beg + area.size;
 			if (addr < areaEnd && end > beg) {
 				if (area.isNoWrite && this.opts.skipNoWrite)
@@ -995,7 +1008,7 @@ export class PhoneDevice extends FlasherDeviceBase {
 			while (restSize != 0) {
 				this.checkCancel();
 				const curSize = Math.min(pageSize, restSize);
-				const addr = (curAddr + this.memoryStart) >>> 0;
+				const addr = curAddr >>> 0;
 
 				debugTrx("TX: R 0x%08X:0x%08X", addr, curSize);
 				await this.transport.write(Buffer.from("R", "latin1"));
@@ -1149,6 +1162,10 @@ export class PhoneDevice extends FlasherDeviceBase {
 		let curSize = 0;
 		let restSize = size;
 		let offset = 0;
+		// The address field the loader wants is not always the address itself:
+		// blockAddr keeps the device address it stands for, for the protected
+		// area check.
+		let blockAddr = 0;
 
 		this.enterBusy();
 		try {
@@ -1160,18 +1177,21 @@ export class PhoneDevice extends FlasherDeviceBase {
 					addr = address = 0;
 				} else {
 					if (opts.writeCmdVersion == 1) {
-						addr = Math.floor((address + (this.memoryStart - (this.phone.memFlashBase ?? this.memoryStart))) / 0x1000);
-						curSize = addr * 0x1000 - (this.memoryStart - (this.phone.memFlashBase ?? this.memoryStart));
+						// v1 sends the block index relative to the flash base
+						// the loader itself works from.
+						const loaderBase = this.phone.memFlashBase ?? this.deviceAddressBase;
+						addr = Math.floor((address - loaderBase) / 0x1000);
+						blockAddr = addr * 0x1000 + loaderBase;
 					} else {
-						addr = (address + this.memoryStart) >>> 0;
-						curSize = addr - this.memoryStart;
+						addr = address >>> 0;
+						blockAddr = addr;
 						if (addr < 0 || addr >= asMax)
 							throw new PhoneDeviceError(sprintf("Address 0x%08X is out of range for the loader.", address));
 						if (restSize >= asMax)
 							throw new PhoneDeviceError("Write block size is out of range for the loader.");
 					}
 
-					if (this.isSkipWritingInBlock(curSize, restSize)) {
+					if (this.isSkipWritingInBlock(blockAddr, restSize)) {
 						this.status(sprintf("Skipping write to the protected block at 0x%08X.", address));
 						break;
 					}

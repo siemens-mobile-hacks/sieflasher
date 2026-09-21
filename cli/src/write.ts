@@ -74,7 +74,7 @@ export async function cmdWrite(args: string[]): Promise<number> {
 			console.error(`phone: ${formatPhoneInfo(info)}`);
 
 		console.error(`writing ${options.file} -> ${formatRange(baseAddr, length)}`);
-		await device.writeFlash(device.getMemoryStart() + baseAddr, input.subarray(0, length));
+		await device.writeFlash(baseAddr, input.subarray(0, length));
 		progress.finish();
 
 		const seconds = (Date.now() - started) / 1000;

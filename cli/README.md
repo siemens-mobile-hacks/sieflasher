@@ -102,8 +102,9 @@ sieflasher revert [options] [patch.vkp]
 | `--no-history` | do not log the run into the patch history |
 
 Patch addresses are the V_KLay flash offsets (`0x00A165E8` is the CPU address
-`0xA0A165E8` on x65); patches written with absolute addresses work as well.
-A patch reaching outside of the flash is rejected before anything is written.
+`0xA0A165E8` on x65) and are used as they are. A patch reaching outside of the
+flash — or, with `--file`, outside of the dump — is rejected before anything is
+written.
 
 ### The patch history and the recovery patches
 

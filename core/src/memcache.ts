@@ -3,7 +3,7 @@
 import { MemGeometry } from "./vkd.js";
 
 export interface CachePage {
-	addr: number; // Relative to the device memory start
+	addr: number;
 	size: number;
 	data: Uint8Array;
 	isChanged: boolean;
@@ -14,11 +14,6 @@ export const DEFAULT_PAGE_SIZE = 0x020000;
 export class MemCache {
 	private geometry: MemGeometry[] = [];
 	private pages: CachePage[] = [];
-	private memAreaStart = 0;
-
-	setMemAreaStart(addr: number): void {
-		this.memAreaStart = addr;
-	}
 
 	getGeometry(): readonly MemGeometry[] {
 		return this.geometry;
@@ -58,9 +53,8 @@ export class MemCache {
 	// the very first known geometry is used for addresses below it.
 	getGeometryIdxForAddr(addr: number, extrapolate: boolean): number {
 		let idx = -1;
-		const absAddr = addr + this.memAreaStart;
 		for (let i = 0; i < this.geometry.length; i++) {
-			if (this.geometry[i].startAddr > absAddr)
+			if (this.geometry[i].startAddr > addr)
 				break;
 			idx = i;
 		}
@@ -109,7 +103,7 @@ export class MemCache {
 		let base = 0;
 		let size = DEFAULT_PAGE_SIZE;
 		if (i != -1) {
-			base = this.geometry[i].startAddr - this.memAreaStart;
+			base = this.geometry[i].startAddr;
 			size = this.geometry[i].pageSize;
 		}
 		return {

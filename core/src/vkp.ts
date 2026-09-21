@@ -158,25 +158,10 @@ export async function applyVkpToDevice(device: DeviceMemory, vkp: VkpParseResult
 	const devStart = device.getMemoryStart();
 	const devEnd = devStart + device.getMemorySize();
 
-	// V_KLay patch addresses are offsets from the flash start (the phone
-	// device addresses the flash relative to its base: "address 0xA15C0000 is
-	// 0x015C0000 in V_KLay"), but patches written with absolute CPU addresses
-	// exist as well. When the flash base is not 0 and the whole patch fits
-	// the flash only as offsets, shift it by the base (the V_KLay
-	// PatcherWrapAddr option, applied automatically).
-	let patchOffset = 0;
-	if (devStart != 0
-		&& !writes.every((w) => w.addr >= devStart && w.addr + w.new.length <= devEnd)
-		&& writes.every((w) => w.addr + w.new.length <= devEnd - devStart))
-		patchOffset = devStart;
-
 	// One planned write: the classification result of the conversion phase
 	// plus the data captured for the repair patch.
 	interface Plan {
 		report: VkpWriteReport;
-		// The original patch address (unshifted): the repair patch keeps the
-		// address form of the source patch.
-		patchAddr: number;
 		// Device data before the operation (repair patch "old" column,
 		// V_KLay's m_PhoneData).
 		current?: Uint8Array;
@@ -220,16 +205,16 @@ export async function applyVkpToDevice(device: DeviceMemory, vkp: VkpParseResult
 		for (const write of group) {
 			const newData = write.new;
 			const oldData = write.old;
-			const addr = write.addr + patchOffset;
+			const addr = write.addr;
 			const base: Omit<VkpWriteReport, "status" | "reason"> = { addr, size: newData.length };
 
 			if (addr < devStart || addr + newData.length > devEnd) {
 				plans.push({
 					report: {
 						...base, status: "error",
-						reason: sprintf("Address 0x%08X (size 0x%X) is outside of the flash.", addr, newData.length),
+						reason: sprintf("Offset 0x%08X (size 0x%X) is outside of the device memory 0x%08X-0x%08X.",
+							addr, newData.length, devStart, devEnd - 1),
 					},
-					patchAddr: write.addr,
 				});
 				continue;
 			}
@@ -293,7 +278,6 @@ export async function applyVkpToDevice(device: DeviceMemory, vkp: VkpParseResult
 				result.read += newData.length;
 				const plan: Plan = {
 					report: { ...base, status: "applied", reason: "" },
-					patchAddr: write.addr,
 					current,
 					written: newData,
 					expected: oldData ?? current,
@@ -329,7 +313,7 @@ export async function applyVkpToDevice(device: DeviceMemory, vkp: VkpParseResult
 				// skips them after the confirmed warning (existNewCounter++),
 				// otherwise they are errors.
 				if (!oldData) {
-					const plan: Plan = { report: { ...base, status: "skipped", reason: "" }, patchAddr: write.addr };
+					const plan: Plan = { report: { ...base, status: "skipped", reason: "" } };
 					plan.report = options.confirmNoOld
 						? { ...base, status: "skipped", reason: "The patch has no old data for this write, it cannot be undone." }
 						: { ...base, status: "error", reason: "The patch has no old data, undo is impossible." };
@@ -341,7 +325,6 @@ export async function applyVkpToDevice(device: DeviceMemory, vkp: VkpParseResult
 				result.read += newData.length;
 				const plan: Plan = {
 					report: { ...base, status: "applied", reason: "" },
-					patchAddr: write.addr,
 					current,
 					written: oldData,
 					expected: newData,
@@ -403,7 +386,7 @@ export async function applyVkpToDevice(device: DeviceMemory, vkp: VkpParseResult
 				continue;
 			if (plan.current.length != plan.written.length || plan.expected.length != plan.written.length)
 				continue;
-			entries.push({ addr: plan.patchAddr, device: plan.current, written: plan.written, expected: plan.expected });
+			entries.push({ addr: plan.report.addr, device: plan.current, written: plan.written, expected: plan.expected });
 		}
 		if (entries.length) {
 			const fileName = makeRepairPatchFileName(options.patchName);

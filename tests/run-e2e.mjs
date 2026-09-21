@@ -497,28 +497,20 @@ function classifyPatchRun(result) {
 	return { status: "failed", reason: `sieflasher exited with ${result.status ?? "a signal"}` };
 }
 
-// Where the patch addresses land in the fullflash, following the rule of
-// applyVkpToDevice: the V_KLay flash offsets are shifted by the flash base,
-// patches written with absolute addresses are taken as they are. Undefined
-// when the patch does not fit the flash either way.
-function patchOffset(writes, size, flashStart) {
-	const fits = (offset) => writes.every((write) =>
-		write.addr + offset >= flashStart && write.addr + offset + write.new.length <= flashStart + size);
-	if (fits(0))
-		return 0;
-	if (flashStart !== 0 && fits(flashStart))
-		return flashStart;
-	return undefined;
+// Whether the patch fits the fullflash, following the rule of
+// applyVkpToDevice: a patch address is the offset from the flash start, so a
+// fullflash dump is indexed by it directly.
+function patchFits(writes, size) {
+	return writes.every((write) => write.addr >= 0 && write.addr + write.new.length <= size);
 }
 
 // The fullflash as it must look after the patch was applied.
-function patchedFullflash(original, writes, flashStart) {
-	const offset = patchOffset(writes, original.length, flashStart);
-	if (offset === undefined)
+function patchedFullflash(original, writes) {
+	if (!patchFits(writes, original.length))
 		throw new Error("the patch does not fit the fullflash");
 	const expected = Buffer.from(original);
 	for (const write of writes)
-		expected.set(write.new, write.addr + offset - flashStart);
+		expected.set(write.new, write.addr);
 	return expected;
 }
 
@@ -528,13 +520,11 @@ function patchedFullflash(original, writes, flashStart) {
 // confirmation, and saves a recovery patch when it is confirmed. This mirrors
 // the classification of applyVkpToDevice, so the recovery test can pick its
 // patch without asking a phone first.
-function patchWarnsOn(writes, flash, flashStart) {
-	const offset = patchOffset(writes, flash.length, flashStart);
-	if (offset === undefined)
+function patchWarnsOn(writes, flash) {
+	if (!patchFits(writes, flash.length))
 		return false;
 	for (const write of writes) {
-		const at = write.addr + offset - flashStart;
-		const current = flash.subarray(at, at + write.new.length);
+		const current = flash.subarray(write.addr, write.addr + write.new.length);
 		// A block that already holds the new data is skipped silently.
 		if (current.equals(write.new))
 			continue;
@@ -563,7 +553,7 @@ function pickRecoveryPatch(entry, ownPatches) {
 	];
 	for (const candidate of candidates) {
 		const writes = candidate.writes ?? parsePatchWrites(candidate.patchPath);
-		if (writes.length && patchWarnsOn(writes, entry.expected, entry.flashStart))
+		if (writes.length && patchWarnsOn(writes, entry.expected))
 			return { ...candidate, writes };
 	}
 	return undefined;
@@ -615,9 +605,6 @@ async function runPatchTest(options, test) {
 			return runCli([
 				command,
 				"--file", flashPath,
-				// The dump starts at the flash start of the phone, so the
-				// patch addresses are placed exactly like on the phone.
-				"--base_addr", `0x${test.flashStart.toString(16)}`,
 				...args,
 				patchPath,
 			], cliTimeout, env);
@@ -659,7 +646,7 @@ async function runPatchTest(options, test) {
 				throw new Error(`sieflasher apply --yes failed (exit ${applied.status ?? "killed"}):\n` +
 					`${applied.stdout}${applied.stderr}`);
 			}
-			mustEqual(patchedFullflash(test.expected, test.writes, test.flashStart),
+			mustEqual(patchedFullflash(test.expected, test.writes),
 				"the forced patch does not match the fullflash");
 
 			const recoveryDir = path.join(env.SIEFLASHER_HOME, "recovery");
@@ -696,7 +683,7 @@ async function runPatchTest(options, test) {
 		// patch when it was applied, and be untouched in every other case (a
 		// patch that does not apply cleanly must never write anything).
 		mustEqual(
-			status === "applied" ? patchedFullflash(test.expected, test.writes, test.flashStart) : test.expected,
+			status === "applied" ? patchedFullflash(test.expected, test.writes) : test.expected,
 			status === "applied"
 				? "the patched fullflash does not match"
 				: `the patch was not applied (${status}) but the fullflash changed`);
@@ -919,22 +906,19 @@ async function main() {
 
 	// The fullflash dumps (a git submodule), read once for the comparisons.
 	const expectedByFile = new Map();
-	// The flash base of every phone comes from the loader: the patch tests
-	// need it to place the V_KLay patch offsets in the fullflash.
+	// The loader must know every phone of the matrix; without this check the
+	// first failure would come from a CLI run, once per test.
 	const vkd = parseVkd(fs.readFileSync(options.loader, "latin1"));
 	for (const entry of PHONES) {
 		const file = path.join(fullflashesDir, entry.fullflash);
 		if (!fs.existsSync(file))
 			throw new Error(`fullflash ${file} not found; run: git submodule update --init`);
+		if (!vkd.phones.some((phone) => phone.name.toLowerCase() === entry.phone.toLowerCase()))
+			throw new Error(`the loader ${options.loader} has no phone "${entry.phone}"`);
 		entry.fullflashPath = file;
 		entry.fullflashSize = fs.statSync(file).size;
 		entry.expected = fs.readFileSync(file);
 		expectedByFile.set(file, entry);
-
-		const vkdPhone = vkd.phones.find((phone) => phone.name.toLowerCase() === entry.phone.toLowerCase());
-		if (!vkdPhone)
-			throw new Error(`the loader ${options.loader} has no phone "${entry.phone}"`);
-		entry.flashStart = vkdPhone.fullflash.addr;
 	}
 
 	// The matrix: every (phone, speed) does a 512 KiB read and a 512 KiB

@@ -132,8 +132,8 @@ async function runPatch(args: string[], revert: boolean): Promise<number> {
 			console.error(`sieflasher: the dump ${options.file} is empty`);
 			return 1;
 		}
-		// The dump start: --base_addr, or the V_KLay "_From_XX" file name
-		// suffix (getAddrFromFileName), or the flash start.
+		// The flash offset the dump starts at: --base_addr, or the V_KLay
+		// "_From_XX" file name suffix (getAddrFromFileName), or the flash start.
 		const baseAddr = options.baseAddr ?? getAddrFromFileName(path.basename(options.file)) ?? 0;
 		const outside = outsideOfMemory(vkp, baseAddr, buffer.length);
 		if (outside) {
@@ -160,10 +160,10 @@ async function runPatch(args: string[], revert: boolean): Promise<number> {
 
 		// Checked before the phone is booted: a patch reaching outside of the
 		// flash is never written, not even partially.
-		const outside = outsideOfMemory(vkp, vkdPhone.fullflash.addr, vkdPhone.fullflash.size);
+		const outside = outsideOfMemory(vkp, 0, vkdPhone.fullflash.size);
 		if (outside) {
 			console.error(`sieflasher: ${patchSource}: ${outside} of the fullflash ` +
-				`${formatRange(vkdPhone.fullflash.addr, vkdPhone.fullflash.size)} of ${phoneDisplayName(vkdPhone)}`);
+				`${formatRange(0, vkdPhone.fullflash.size)} of ${phoneDisplayName(vkdPhone)}`);
 			return 1;
 		}
 
@@ -315,24 +315,17 @@ async function runPatch(args: string[], revert: boolean): Promise<number> {
 }
 
 // The writes of a patch that do not fit the device memory, as a message.
-//
-// V_KLay patch addresses are flash offsets, but patches written with absolute
-// CPU addresses exist as well: applyVkpToDevice() shifts the whole patch by
-// the flash base when it only fits that way. The same rule is applied here
-// before the device is touched, so that a patch made for another phone (or
-// another memory area) is rejected as a whole instead of being written
-// partially.
+// Checked before the device is touched, so that a patch made for another
+// phone (or another memory area) is rejected as a whole instead of being
+// written partially.
 function outsideOfMemory(vkp: VkpParseResult, start: number, size: number): string | undefined {
 	const end = start + size;
-	const fits = (offset: number) =>
-		vkp.writes.every((write) => write.addr + offset >= start && write.addr + offset + write.new.length <= end);
-	if (fits(0) || (start != 0 && fits(start)))
-		return undefined;
-	const offset = start != 0 && vkp.writes.some((write) => write.addr < start) ? start : 0;
 	const bad = vkp.writes.filter((write) =>
-		write.addr + offset < start || write.addr + offset + write.new.length > end);
+		write.addr < start || write.addr + write.new.length > end);
+	if (!bad.length)
+		return undefined;
 	const shown = bad.slice(0, 3)
-		.map((write) => `${hex(write.addr + offset)} (${write.new.length} B, line ${write.loc?.line})`)
+		.map((write) => `${hex(write.addr)} (${write.new.length} B, line ${write.loc?.line})`)
 		.join(", ");
 	return `${bad.length} of ${vkp.writes.length} write(s) are outside ` +
 		`[${shown}${bad.length > 3 ? ", ..." : ""}]`;

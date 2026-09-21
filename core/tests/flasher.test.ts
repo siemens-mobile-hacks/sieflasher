@@ -384,24 +384,27 @@ test("vkd parsing", () => {
 });
 
 test("memcache geometry", () => {
+	// The cache and the geometry both work in the device addresses of the
+	// driver file: a page covers exactly the flash block at its address.
 	const cache = new MemCache();
-	cache.setMemAreaStart(0x400000);
 	cache.setGeometry([
 		{ startAddr: 0x400000, pageSize: 0x20000 },
 		{ startAddr: 0x800000, pageSize: 0x10000 },
 	]);
+	assert.equal(cache.pageSizeAtAddr(0x400000), 0x20000);
+	assert.equal(cache.pageSizeAtAddr(0x7FFFFF), 0x20000);
+	assert.equal(cache.pageSizeAtAddr(0x800000), 0x10000);
+	// Addresses below the first known geometry use its page size.
 	assert.equal(cache.pageSizeAtAddr(0), 0x20000);
-	assert.equal(cache.pageSizeAtAddr(0x3FFFF), 0x20000);
-	assert.equal(cache.pageSizeAtAddr(0x400000), 0x10000);
-	const page1 = cache.getPageAtAddr(0x10000)!;
-	assert.equal(page1.page.addr, 0);
+	const page1 = cache.getPageAtAddr(0x410000)!;
+	assert.equal(page1.page.addr, 0x400000);
 	assert.equal(page1.page.size, 0x20000);
 	assert.ok(page1.isNew);
-	const page2 = cache.getPageAtAddr(0x12345)!;
-	assert.equal(page2.page.addr, 0);
+	const page2 = cache.getPageAtAddr(0x412345)!;
+	assert.equal(page2.page.addr, 0x400000);
 	assert.ok(!page2.isNew);
-	const page3 = cache.getPageAtAddr(0x20000)!;
-	assert.equal(page3.page.addr, 0x20000);
+	const page3 = cache.getPageAtAddr(0x420000)!;
+	assert.equal(page3.page.addr, 0x420000);
 	assert.equal(page3.page.size, 0x20000);
 	assert.ok(page3.isNew);
 });
@@ -421,16 +424,16 @@ test("phone device v1: boot, read, write", async () => {
 	await device.open(115200);
 	assert.ok(device.connected);
 
-	// Reading (every public entry point takes the device addresses of
-	// getMemoryStart()).
-	const data = await device.read(0x400100, 0x100);
+	// Reading (every public entry point takes the flash offset; this phone
+	// maps its flash at 0x400000, where the mock flash is indexed).
+	const data = await device.read(0x100, 0x100);
 	assert.equal(data.length, 0x100);
 	assert.deepEqual(Buffer.from(data), mock.flash.subarray(0x400100, 0x400200));
 
 	// Writing: 0x30000 spans two cache pages of 0x20000, the second page is
 	// flushed entirely (page-granularity writes, as in V_KLay) => 4 x 64k blocks.
 	const pattern = Buffer.alloc(0x30000, 0xAB);
-	await device.write(0x400000, pattern);
+	await device.write(0, pattern);
 	await device.flush();
 	assert.equal(mock.writes.length, 4);
 	for (const w of mock.writes) {
@@ -441,28 +444,39 @@ test("phone device v1: boot, read, write", async () => {
 	await device.disconnect();
 });
 
-test("phone device: device addresses and flash offsets", async () => {
-	// Every public entry point takes the device addresses (getMemoryStart()..),
-	// like FullFlashDevice does, both the session read()/write() and the
-	// one-shot readFlash(); the flash offsets the loader itself uses never
-	// leave the class.
+test("phone device: flash offsets and device addresses", async () => {
+	// Every public entry point takes the offset from the flash start, both
+	// the session read()/write() and the one-shot readFlash(); the device
+	// addresses the loader, the geometry and the memory areas use never leave
+	// the class.
 	const vkd = parseVkd(VKD_S55);
 	const phone = vkd.phones[0];
 	const mock = new MockPhoneV1(0x400000, 0xC00000);
 	const device = new PhoneDevice(new MockTransportV1(mock), phone, vkd.boots);
 	await device.open();
 
-	assert.equal(device.getMemoryStart(), 0x400000);
-	const expected = mock.flash.subarray(0x400100, 0x400200);
-	assert.deepEqual(Buffer.from(await device.read(0x400100, 0x100)), Buffer.from(expected));
-	assert.deepEqual(Buffer.from(await device.readFlash(0x400100, 0x100)), Buffer.from(expected));
+	assert.equal(device.getMemoryStart(), 0);
+	assert.equal(device.getMemorySize(), 0xC00000);
+	assert.equal(device.deviceAddressBase, 0x400000);
+	// The driver states its memory areas as device addresses; what comes out
+	// is the same list as offsets.
+	assert.equal(phone.memAreas[0].addr, 0x400000);
+	assert.equal(device.memAreas[0].addr, 0);
+	assert.equal(device.memAreas[0].name, phone.memAreas[0].name);
 
-	// The flash offset of a device address is not a device address itself.
-	await assert.rejects(() => device.read(0x100, 0x10), /outside of the phone memory/);
-	await assert.rejects(() => device.read(0x400000 + 0xC00000, 0x10), /outside of the phone memory/);
-	await assert.rejects(() => device.write(0x100, Buffer.alloc(4)), /outside of the phone memory/);
-	await assert.rejects(() => device.readFlash(0x100, 0x10), /outside of the phone memory/);
-	await assert.rejects(() => device.writeFlash(0x100, Buffer.alloc(4)), /outside of the phone memory/);
+	const expected = mock.flash.subarray(0x400100, 0x400200);
+	assert.deepEqual(Buffer.from(await device.read(0x100, 0x100)), Buffer.from(expected));
+	assert.deepEqual(Buffer.from(await device.readFlash(0x100, 0x100)), Buffer.from(expected));
+
+	// The range is checked in offsets, 0 .. getMemorySize(): the device
+	// address of the last byte is past the end of it.
+	await assert.rejects(() => device.read(-1, 0x10), /outside of the phone memory/);
+	await assert.rejects(() => device.read(0xC00000, 0x10), /outside of the phone memory/);
+	await assert.rejects(() => device.read(0xBFFFF8, 0x10), /outside of the phone memory/);
+	await assert.rejects(() => device.read(device.deviceAddressBase + 0xBFFFF0, 0x10), /outside of the phone memory/);
+	await assert.rejects(() => device.write(0xC00000, Buffer.alloc(4)), /outside of the phone memory/);
+	await assert.rejects(() => device.readFlash(0xC00000, 0x10), /outside of the phone memory/);
+	await assert.rejects(() => device.writeFlash(0xC00000, Buffer.alloc(4)), /outside of the phone memory/);
 
 	// A patch applies to the phone device without any address juggling by the
 	// caller: the patch addresses are flash offsets, like in V_KLay.
@@ -484,9 +498,10 @@ test("phone device: bootcore write skip", async () => {
 	const device = new PhoneDevice(transport, phone, vkd.boots, { skipBootcore: true });
 	await device.open();
 
-	// The bootcore area is at 0x800000-0x810000, flash page there = 0x10000
+	// The bootcore area is at 0x800000-0x810000 (offset 0x400000), flash page
+	// there = 0x10000
 	const pattern = Buffer.alloc(0x10000, 0xCD);
-	await device.write(0x800000, pattern);
+	await device.write(0x400000, pattern);
 	await device.flush();
 	// No write must happen (bootcore skip)
 	assert.equal(mock.writes.length, 0);
@@ -842,13 +857,16 @@ test("vkp repair patch: V_KLay line format (16-byte aligned columns)", () => {
 	assert.match(makeRepairPatchFileName(), /^Patch_\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}_REPAIR\.vkp$/);
 });
 
-test("vkp apply: flash-relative patch addresses (x65/x75 patch form)", async () => {
-	// x65/x75 phones: the flash is at 0xA0000000 and the patches use offsets
-	// from the flash start (V_KLay: "address 0xA15C0000 is 0x015C0000",
-	// so the user's 0x00A165E8 is the CPU address 0xA0A165E8).
+test("vkp apply: patch addresses are flash offsets, never CPU addresses", async () => {
+	// x65/x75 phones map the flash at 0xA0000000, and V_KLay states the
+	// relationship as "address 0xA15C0000 is 0x015C0000" - but the patches
+	// themselves are written in the offset form throughout (every one of the
+	// 2,007,746 writes of the corpus in tests/patches). A patch address is
+	// therefore used as it is; one that only makes sense as a CPU address is
+	// out of the flash and is rejected, not quietly relocated.
 	const buf = Buffer.alloc(0x2000000, 0xFF);
 	buf.write("CODE", 0xA165E8, "latin1");
-	const device = new FullFlashDevice(buf, 0xA0000000);
+	const device = new FullFlashDevice(buf);
 	await device.open();
 
 	const makeVkp = (addr: number) => ({
@@ -865,25 +883,18 @@ test("vkp apply: flash-relative patch addresses (x65/x75 patch form)", async () 
 		}],
 	} as any);
 
-	// The offset form (the user's patch style) must apply at the right place.
 	const result = await applyVkpToDevice(device, makeVkp(0xA165E8), {});
 	assert.ok(result.ok);
 	assert.ok(!result.alreadyDone);
 	assert.equal(result.written, 4);
 	assert.deepEqual(Buffer.from(buf.subarray(0xA165E8, 0xA165EC)), Buffer.from([0xDE, 0xAD, 0xBE, 0xEF]));
 
-	// The absolute form addresses the same location and undoes it.
-	const result2 = await applyVkpToDevice(device, makeVkp(0xA0A165E8), { revert: true });
-	assert.ok(result2.ok);
-	assert.equal(result2.written, 4);
-	assert.deepEqual(Buffer.from(buf.subarray(0xA165E8, 0xA165EC)), Buffer.from("CODE", "latin1"));
-
-	// Addresses that fit the flash neither as absolute nor as offsets
-	// are still rejected.
-	const result3 = await applyVkpToDevice(device, makeVkp(0x3000000), { dryRun: true });
-	assert.ok(!result3.ok);
-	assert.ok(!result3.alreadyDone);
-	assert.equal(result3.reports.filter((r) => r.status == "error").length, 1);
+	for (const addr of [0xA0A165E8, 0x3000000]) {
+		const rejected = await applyVkpToDevice(device, makeVkp(addr), { dryRun: true });
+		assert.ok(!rejected.ok);
+		assert.ok(!rejected.alreadyDone);
+		assert.equal(rejected.reports.filter((r) => r.status == "error").length, 1);
+	}
 });
 
 test("vkp apply: patch with errors is not reported as already applied", async () => {
@@ -1156,13 +1167,13 @@ test("phone device x65: v2 protocol with authorization and test-empty", async ()
 	}
 
 	// Reading
-	const data = await device.read(0xA0000000, 0x100);
+	const data = await device.read(0, 0x100);
 	assert.ok(Buffer.from(data).equals(mock.flash.subarray(0, 0x100)));
 
 	// Writing (v2: F + addr(4) + size(4) + data + crc).
 	// Write outside of the bootcore area (which is skipped by default).
 	const pattern = Buffer.alloc(0x18000, 0xCD); // partial page of 0x20000
-	await device.write(0xA0040000, pattern);
+	await device.write(0x40000, pattern);
 	await device.flush();
 	assert.equal(mock.writes.length, 1); // the whole 0x20000 cache page
 	assert.equal(mock.writes[0].addr, mock.base + 0x40000);
@@ -1202,7 +1213,7 @@ optLoaderUploadDelay=1`));
 	await device.open(115200);
 	assert.ok(device.connected);
 	// The loader state of the mock must be past the boot phase now.
-	const data = await device.read(0xA0000000, 0x100);
+	const data = await device.read(0, 0x100);
 	assert.equal(data.length, 0x100);
 	await device.disconnect();
 });
@@ -1339,13 +1350,13 @@ test("phone device: repeated reads always fetch fresh data from the phone", asyn
 	const device = new PhoneDevice(transport, phone, vkd.boots);
 	await device.open(115200);
 
-	const first = await device.readFlash(0x401000, 0x100);
+	const first = await device.readFlash(0x1000, 0x100);
 	assert.ok(Buffer.from(first).equals(mock.flash.subarray(0x401000, 0x401100)));
 
 	// The flash content changes between the operations (e.g. the phone FFS):
 	// the second read must not be served from the stale page cache.
 	mock.flash.fill(0x5A, 0x401000, 0x401100);
-	const second = await device.readFlash(0x401000, 0x100);
+	const second = await device.readFlash(0x1000, 0x100);
 	assert.ok(Buffer.from(second).equals(mock.flash.subarray(0x401000, 0x401100)),
 		"the second read must return the updated phone data");
 
@@ -1404,16 +1415,19 @@ async function makeForeignFlashPhone(corruptFirstChunk = false) {
 	const device = new PhoneDevice(transport, phone, vkd.boots);
 	await device.open(115200);
 
+	// The loader commands are addressed the way the phone is (0xA0000000..);
+	// the blocks are counted as flash offsets, like the patch addresses.
+	const base = device.deviceAddressBase;
 	const blockReads: number[] = [];
 	const blockWrites: number[] = [];
 	const origRead = device.loaderReadMemory.bind(device);
 	const origWrite = device.loaderWriteMemory.bind(device);
 	device.loaderReadMemory = async (addr, size, out) => {
-		blockReads.push(addr);
+		blockReads.push(addr - base);
 		return origRead(addr, size, out);
 	};
 	device.loaderWriteMemory = async (addr, size, data) => {
-		blockWrites.push(addr);
+		blockWrites.push(addr - base);
 		return origWrite(addr, size, data);
 	};
 	return { device, mock, dump, blockReads, blockWrites };

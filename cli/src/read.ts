@@ -57,7 +57,7 @@ export async function cmdRead(args: string[]): Promise<number> {
 			console.error(`phone: ${formatPhoneInfo(info)}`);
 
 		console.error(`reading ${formatRange(baseAddr, length)} -> ${options.file}`);
-		const data = await device.readFlash(device.getMemoryStart() + baseAddr, length);
+		const data = await device.readFlash(baseAddr, length);
 		progress.finish();
 		writeFileSync(options.file, data);
 

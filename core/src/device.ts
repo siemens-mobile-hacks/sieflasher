@@ -19,18 +19,19 @@ export const DeviceOperations = {
 // (applyVkpToDevice, for one). Any FlasherDevice qualifies, and so does a
 // plain object delegating to one, e.g. across a worker boundary.
 //
-// read() and write() address the device memory the way the device itself
-// is addressed: from getMemoryStart() to getMemoryStart() +
-// getMemorySize() (0xA0000000.. for the x65 flash, 0.. for a fullflash
-// dump that starts at the flash start).
+// read() and write() address the memory by the offset from the flash start,
+// which is the form V_KLay shows and VKP patches are written in ("address
+// 0xA15C0000 is 0x015C0000"). A device covers getMemoryStart() ..
+// getMemoryStart() + getMemorySize() of the flash: a phone the whole of it,
+// a dump of a part of it only that part.
 export interface DeviceMemory {
-	read(addr: number, size: number): Promise<Uint8Array>;
-	// The written data may be buffered until flush() puts it on the device,
-	// so that an operation costs one read and one write per touched block.
-	write(addr: number, data: Uint8Array): Promise<void>;
+	read(offset: number, size: number): Promise<Uint8Array>;
+	// The written data may be buffered until flush() puts it on the device
+	write(offset: number, data: Uint8Array): Promise<void>;
 	flush(): Promise<void>;
 
 	getMemorySize(): number;
+	// The flash offset of the first byte this device covers.
 	getMemoryStart(): number;
 }
 
@@ -69,8 +70,8 @@ export abstract class FlasherDeviceBase implements FlasherDevice {
 	abstract open(): Promise<void>;
 	abstract close(): Promise<void>;
 
-	abstract read(addr: number, size: number): Promise<Uint8Array>;
-	abstract write(addr: number, data: Uint8Array): Promise<void>;
+	abstract read(offset: number, size: number): Promise<Uint8Array>;
+	abstract write(offset: number, data: Uint8Array): Promise<void>;
 	abstract flush(): Promise<void>;
 	abstract abort(): Promise<void>;
 
@@ -89,7 +90,7 @@ export abstract class FlasherDeviceBase implements FlasherDevice {
 
 // The default dump file name, like V_KLay's GetDefaultFlashFileName():
 //   {DeviceName}_{YYYY-MM-DD_HH-MM-SS}_From_{XX}.bin
-// where XX is the flash start address in 64k units (addr >> 16).
+// where XX is the flash offset the dump starts at, in 64k units (addr >> 16).
 export function makeDumpFileName(deviceName: string, fromAddr: number): string {
 	const name = (deviceName || "Mem").replace(/\s+/g, "_");
 	const pad = (n: number) => String(n).padStart(2, "0");
@@ -100,9 +101,9 @@ export function makeDumpFileName(deviceName: string, fromAddr: number): string {
 	return `${name}_${ts}_From_${from}.bin`;
 }
 
-// Extracts the flash start address from the dump file name
+// Extracts the flash offset the dump starts at from its file name
 // (port of V_KLay's GetAddrFromFileName): the trailing _HHHH / _-HHHH /
-// _HH / _-HH group before the extension is the address in 64k units.
+// _HH / _-HH group before the extension is the offset in 64k units.
 export function getAddrFromFileName(name: string): number | undefined {
 	const dot = name.lastIndexOf(".");
 	const base = dot == -1 ? name : name.slice(0, dot);
