@@ -36,6 +36,18 @@
 		"copyright": "Freia, Ported to V_Klay by LazyC0DEr"
 	},
 	{
+		"file": "A70_A75.vkd",
+		"name": "A70/A75",
+		"releaseDate": "2026-09-25",
+		"copyright": "ufoshko"
+	},
+	{
+		"file": "AX75_AX72_CF110_AL21_A31_AF51.vkd",
+		"name": "AX75/AX72/CF110/AL21/A31/AF51",
+		"releaseDate": "2026-09-21",
+		"copyright": "ufoshko"
+	},
+	{
 		"file": "C30.vkd",
 		"name": "C30",
 		"releaseDate": "2004-05-26",
